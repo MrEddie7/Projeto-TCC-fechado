@@ -4,9 +4,8 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.tcc.veiculotracker.data.local.AppDatabase
+import com.tcc.veiculotracker.App
 import com.tcc.veiculotracker.data.local.entity.Vehicle
-import com.tcc.veiculotracker.data.repository.VehicleRepository
 import com.tcc.veiculotracker.util.Constants
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -22,8 +21,9 @@ data class RemoteControlState(
 
 class RemoteControlViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val db = AppDatabase.getInstance(application)
-    private val vehicleRepository = VehicleRepository(db.vehicleDao())
+    private val app = application as App
+    private val vehicleRepository = app.vehicleRepository
+    private val syncManager = app.syncManager
     private val prefs = application.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
 
     private val _state = MutableStateFlow(RemoteControlState())
@@ -52,7 +52,10 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
         viewModelScope.launch {
             _state.value = _state.value.copy(isExecuting = true, error = null)
             try {
+                // Atualiza o Room e propaga para o Firestore (via repositório)
                 vehicleRepository.setBlocked(vehicle.id, true)
+                // Envia comando para o rastreador via Realtime Database
+                syncManager.sendCommand(vehicle.id, "block")
                 _state.value = _state.value.copy(
                     isExecuting = false,
                     lastAction = "Veículo bloqueado com sucesso"
@@ -72,6 +75,7 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
             _state.value = _state.value.copy(isExecuting = true, error = null)
             try {
                 vehicleRepository.setBlocked(vehicle.id, false)
+                syncManager.sendCommand(vehicle.id, "unblock")
                 _state.value = _state.value.copy(
                     isExecuting = false,
                     lastAction = "Veículo desbloqueado com sucesso"

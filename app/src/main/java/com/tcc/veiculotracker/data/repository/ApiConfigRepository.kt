@@ -3,6 +3,7 @@ package com.tcc.veiculotracker.data.repository
 import com.tcc.veiculotracker.data.local.dao.ApiConfigDao
 import com.tcc.veiculotracker.data.local.entity.ApiConfig
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 
 class ApiConfigRepository(private val apiConfigDao: ApiConfigDao) {
 
@@ -20,8 +21,10 @@ class ApiConfigRepository(private val apiConfigDao: ApiConfigDao) {
 
     suspend fun setActiveConfig(userId: Long, configId: Long) {
         apiConfigDao.deactivateAll(userId)
-        val config = apiConfigDao.getConfigsByUser(userId)
-        apiConfigDao.update(config.first().copy(id = configId, isActive = true))
+        val configs = apiConfigDao.getConfigsByUser(userId).first()
+        configs.find { it.id == configId }?.let {
+            apiConfigDao.update(it.copy(isActive = true))
+        }
     }
 
     suspend fun deleteConfig(config: ApiConfig) {

@@ -4,11 +4,11 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.tcc.veiculotracker.data.local.AppDatabase
+import com.tcc.veiculotracker.App
 import com.tcc.veiculotracker.data.local.entity.Vehicle
-import com.tcc.veiculotracker.data.repository.VehicleRepository
 import com.tcc.veiculotracker.util.Constants
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
 
 data class DashboardState(
     val userName: String = "",
@@ -21,8 +21,7 @@ data class DashboardState(
 
 class DashboardViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val db = AppDatabase.getInstance(application)
-    private val vehicleRepository = VehicleRepository(db.vehicleDao())
+    private val vehicleRepository = (application as App).vehicleRepository
     private val prefs = application.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
 
     private val _state = MutableStateFlow(DashboardState())
@@ -31,6 +30,9 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     val userId: Long get() = prefs.getLong(Constants.KEY_USER_ID, -1)
 
     init {
+        viewModelScope.launch {
+            vehicleRepository.pullFromCloud(userId)
+        }
         loadDashboard()
     }
 

@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">VeiculoTracker</string>
+    <string name="app_name">Securitas</string>
+    <!--
+        Web Client ID do OAuth do projeto Firebase (id "securitas-ce0bd").
+        O plugin google-services gera automaticamente o recurso
+        "default_web_client_id" a partir do google-services.json, que é a fonte
+        preferida no código. Valor abaixo é a referência manual (client_type 3).
+    -->
+    <string name="google_web_client_id" translatable="false">35252490635-e5kpel0npkndurl81n431c7gdcjhbl67.apps.googleusercontent.com</string>
 </resources>

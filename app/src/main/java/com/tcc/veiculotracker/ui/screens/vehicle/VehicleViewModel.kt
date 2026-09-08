@@ -4,9 +4,8 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.tcc.veiculotracker.data.local.AppDatabase
+import com.tcc.veiculotracker.App
 import com.tcc.veiculotracker.data.local.entity.Vehicle
-import com.tcc.veiculotracker.data.repository.VehicleRepository
 import com.tcc.veiculotracker.util.Constants
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -24,9 +23,7 @@ data class VehicleListState(
 
 class VehicleViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val db = AppDatabase.getInstance(application)
-    private val repository = VehicleRepository(db.vehicleDao())
-
+    private val repository = (application as App).vehicleRepository
     private val prefs = application.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
     private val userId: Long get() = prefs.getLong(Constants.KEY_USER_ID, -1)
 

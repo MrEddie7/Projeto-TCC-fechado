@@ -1,0 +1,188 @@
+================================================================================
+                    VEICULOTRACKER (SECURITAS) - DOCUMENTAÇÃO DO PROJETO
+================================================================================
+
+1. VISÃO GERAL DO PROJETO
+--------------------------------------------------------------------------------
+O VeiculoTracker é um sistema móvel moderno e robusto voltado para rastreamento
+veicular, telemetria em tempo real, segurança patrimonial (bloqueio remoto) e
+gestão de rotas históricas. O aplicativo foi desenvolvido nativamente para Android
+utilizando as tecnologias mais recentes do ecossistema Google (Kotlin, Jetpack Compose,
+Material Design 3, Room SQLite, Firebase e Google Maps Platform).
+
+Objetivo Principal:
+Permitir que usuários e gestores monitorem a localização de seus veículos em tempo
+real sobre o Google Maps, emitam comandos de corte de ignição/bloqueio remoto,
+analisem trajetos percorridos com métricas de velocidade e distância, funcionando
+com arquitetura offline-first (banco SQLite interno) e sincronização contínua com a
+nuvem (Firebase Cloud Firestore e Realtime Database).
+
+
+2. STACK TECNOLÓGICO E BIBLIOTECAS
+--------------------------------------------------------------------------------
+- Linguagem de Programação: Kotlin (v2.2+)
+- Interface Declarativa: Jetpack Compose + Material Design 3 + Compose Icons Extended
+- Arquitetura: MVVM (Model-View-ViewModel) + Repository Pattern + Clean Architecture
+- Banco de Dados Interno: SQLite gerenciado via Room ORM + Kotlin Symbol Processing (KSP)
+- Concorrência e Reatividade: Kotlin Coroutines & StateFlow / SharedFlow
+- Plataforma em Nuvem (Google Cloud / Firebase - Projeto: securitas-ce0bd):
+    * Firebase Authentication: Autenticação segura de usuários.
+    * Firebase Realtime Database: Telemetria GPS ao vivo e mensageria de comandos remotos.
+    * Cloud Firestore: Persistência distribuída de cadastros e históricos de viagens.
+- Mapas e Geolocalização:
+    * Google Maps Compose (`com.google.maps.android:maps-compose`)
+    * Google Play Services Maps & Location (`play-services-maps`, `play-services-location`)
+
+
+3. ARQUITETURA DE DADOS: PLANO HÍBRIDO (SQLITE + FIREBASE)
+--------------------------------------------------------------------------------
+A aplicação utiliza uma estratégia de dados em 3 camadas complementares:
+
+[1] SQLite Interno (Room Database Local - `veiculotracker_db`):
+    - É a fonte imediata da verdade para a interface do usuário.
+    - Garante inicialização instantânea e operação 100% offline.
+    - Tabelas:
+        * users: Dados da conta local e credenciais.
+        * vehicles: Cadastro de veículos, placa, modelo, status de bloqueio e última posição.
+        * routes: Registro resumido de viagens (início, fim, distância total, status).
+        * route_points: Pontos geográficos detalhados (latitude, longitude, velocidade, tempo).
+        * api_configs: Parâmetros de vinculação com APIs externas de rastreadores IoT.
+
+[2] Firebase Realtime Database (Telemetria & Comandos Instantâneos):
+    - Caminho `/telemetry/{vehicleId}`:
+        Recebe e distribui o fluxo contínuo de coordenadas GPS (lat, lng, velocidade, rumo).
+    - Caminho `/commands/{vehicleId}`:
+        Canal de baixa latência para envio e confirmação do bloqueio/desbloqueio de ignição.
+
+[3] Cloud Firestore (Armazenamento Estruturado em Nuvem):
+    - Coleção `/users/{userId}`: Perfil do usuário e preferências sincronizadas.
+    - Coleção `/vehicles/{vehicleId}`: Metadados dos veículos associados à conta.
+    - Coleção `/routes/{routeId}`: Histórico consolidado de rotas para auditoria e relatórios.
+
+
+4. ESTRUTURA DE DIRETÓRIOS E MÓDULOS DO CÓDIGO FONTE
+--------------------------------------------------------------------------------
+O código está organizado dentro do pacote raiz `com.tcc.veiculotracker`:
+
+├── App.kt                          -> Classe Application, inicializa banco Room e serviços.
+├── MainActivity.kt                 -> Ponto de entrada Android com carregamento do NavGraph.
+│
+├── data/
+│   ├── local/
+│   │   ├── AppDatabase.kt          -> Definição do Room Database SQLite e migrações.
+│   │   ├── dao/
+│   │   │   ├── UserDao.kt          -> Operações SQL de usuários.
+│   │   │   ├── VehicleDao.kt       -> Operações SQL de veículos (inserir, listar, atualizar posição).
+│   │   │   ├── RouteDao.kt         -> Operações SQL de rotas e pontos de rota.
+│   │   │   └── ApiConfigDao.kt     -> Operações SQL de chaves e URLs de APIs IoT.
+│   │   └── entity/
+│   │       ├── User.kt             -> Entidade SQLite para Usuários.
+│   │       ├── Vehicle.kt          -> Entidade SQLite para Veículos.
+│   │       ├── Route.kt            -> Entidade SQLite para Rotas.
+│   │       ├── RoutePoint.kt       -> Entidade SQLite para Pontos Geográficos.
+│   │       └── ApiConfig.kt        -> Entidade SQLite para Configurações de API.
+│   ├── remote/
+│   │   └── FirebaseDataSource.kt   -> Conexão e escutas no Realtime DB e Cloud Firestore.
+│   ├── sync/
+│   │   └── SyncManager.kt          -> Sincronizador bidirecional entre Room e Firebase.
+│   └── repository/
+│       ├── AuthRepository.kt       -> Lógica de autenticação e sessão.
+│       ├── VehicleRepository.kt    -> Gestão de veículos e atualização de posições.
+│       ├── RouteRepository.kt      -> Registro e recuperação de histórico de viagens.
+│       └── ApiConfigRepository.kt  -> Gerenciamento de chaves e endpoints de APIs externas.
+│
+├── ui/
+│   ├── components/
+│   │   ├── BottomNavBar.kt         -> Barra de navegação inferior com ícones e rotas.
+│   │   ├── VehicleCard.kt          -> Componente reutilizável de cartão de veículo com status.
+│   │   └── LoadingOverlay.kt       -> Indicador visual de progresso e carregamento.
+│   ├── navigation/
+│   │   ├── Screen.kt               -> Definição sealed class das rotas da aplicação.
+│   │   └── NavGraph.kt             -> Grafo de navegação Compose com controle de transições.
+│   ├── screens/
+│   │   ├── login/                  -> Tela e ViewModel de Login e validações.
+│   │   ├── register/               -> Tela e ViewModel de Registro de novos usuários.
+│   │   ├── dashboard/              -> Painel principal (contadores, status da frota, atalhos).
+│   │   ├── tracking/               -> Rastreamento ao vivo com Google Maps interativo.
+│   │   ├── remote/                 -> Controle remoto para bloqueio e desbloqueio veicular.
+│   │   ├── history/                -> Histórico de rotas com traçado polilinha no Google Maps.
+│   │   ├── vehicle/                -> Formulário de cadastro de novos veículos.
+│   │   ├── settings/               -> Configurações de tema (Dark Mode), conta e notificações.
+│   │   └── apilink/                -> Configuração de vínculo de API externa / Gateway de GPS.
+│   └── theme/
+│       ├── Color.kt                -> Paleta de cores corporativa (Primária, Active, Blocked, Warning).
+│       ├── Theme.kt                -> Configuração do Material3 Theme dinâmico (claro/escuro).
+│       └── Type.kt                 -> Tipografia padrão e estilos de texto.
+└── util/
+    ├── Constants.kt                -> Chaves de SharedPreferences e constantes globais.
+    └── Resource.kt                 -> Wrapper genérico para estados de Success, Error e Loading.
+
+
+5. DETALHAMENTO DAS TELAS E FLUXOS DO USUÁRIO
+--------------------------------------------------------------------------------
+1. Login & Registro (LoginScreen / RegisterScreen):
+   - Telas de entrada com campos para e-mail e senha.
+   - Suporte a autenticação local com validações e vinculação com Firebase Auth.
+
+2. Dashboard Principal (DashboardScreen):
+   - Exibe resumo da frota: Total de Veículos, Veículos Ativos e Veículos Bloqueados.
+   - Lista os veículos do usuário com status de velocidade e última atualização.
+   - Acesso rápido para adicionar novo veículo, controle remoto e vinculação de API.
+
+3. Rastreamento em Tempo Real (TrackingScreen com Google Maps):
+   - Exibe o mapa interativo do Google Maps ocupando a visualização.
+   - Marcador dinâmico do veículo movimentando-se de acordo com o sinal GPS recebido.
+   - Cartão flutuante com dados de telemetria ao vivo (velocidade em km/h, latitude, longitude).
+   - Botão para Iniciar/Parar rastreamento e centralizar a câmera no veículo selecionado.
+
+4. Controle Remoto / Anti-Furto (RemoteControlScreen):
+   - Permite selecionar qualquer veículo cadastrado.
+   - Botão de Ação Crítica: "Bloquear Veículo" (corte de ignição) e "Desbloquear Veículo".
+   - Altera o estado local no SQLite e envia sinal imediato via Firebase Realtime Database.
+
+5. Histórico de Rotas (RouteHistoryScreen com Google Maps):
+   - Lista todas as viagens concluídas pelo veículo com data, hora e distância total (km).
+   - Ao selecionar uma rota, renderiza no Google Maps a linha contínua do trajeto (Polyline)
+     com marcador Verde no ponto de partida e marcador Vermelho no destino final.
+
+6. Cadastro de Veículo (VehicleRegisterScreen):
+   - Formulário completo para inserir placa, marca, modelo, ano e cor.
+   - Validação de formato da placa Mercosul / Tradicional e persistência local + nuvem.
+
+7. Linkagem de API (ApiLinkScreen):
+   - Permite ao usuário configurar URLs de endpoints externos e chaves de API para
+     integração com dispositivos rastreadores IoT físicos (ex: protocolos Teltonika, Suntech, OBD-II).
+
+8. Configurações (SettingsScreen):
+   - Alternador de tema escuro (Dark Mode).
+   - Configurações de intervalo de atualização do GPS.
+   - Notificações de alerta de movimentação ou bloqueio.
+   - Opção de encerramento de sessão (Logout).
+
+
+6. MAPEAMENTO DOS PROTÓTIPOS VISILY DO PROJETO
+--------------------------------------------------------------------------------
+Os arquivos de design presentes na raiz do projeto correspondem exatamente às telas:
+- `visily-login.png`                       -> LoginScreen
+- `visily-validação.png`                   -> Validação de campos no formulário
+- `visily-dashboard-principal.png`         -> DashboardScreen
+- `visily-rastreamento-em-tempo-real.png`  -> TrackingScreen (com Google Maps)
+- `visily-controle-remoto.png`             -> RemoteControlScreen
+- `visily-mobile-preview-(bloqueio).png`   -> Confirmação visual de bloqueio veicular
+- `visily-histórico-de-rotas.png`          -> RouteHistoryScreen
+- `visily-registro-veiculo.png`            -> VehicleRegisterScreen
+- `visily-registro-de-veiculo-erros.png`   -> Tratamento de erros de validação
+- `visily-registro-sucesso.png`            -> Diálogo de confirmação de cadastro
+- `visily-configurações.png`               -> SettingsScreen
+- `visily-linkagem-da-api.png`             -> ApiLinkScreen
+
+
+7. CONSIDERAÇÕES DE SEGURANÇA E NUVEM
+--------------------------------------------------------------------------------
+- As chaves de API do Google Cloud e credenciais do Firebase estão configuradas no
+  arquivo `google-services.json`.
+- Para o Google Maps operar sem restrições, a API "Maps SDK for Android" deve estar
+  habilitada no console do Google Cloud do projeto `securitas-ce0bd`.
+- A persistência offline do SQLite (Room) garante resiliência total contra quedas
+  de conectividade móvel durante viagens.
+================================================================================

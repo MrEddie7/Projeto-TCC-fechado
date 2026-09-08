@@ -13,6 +13,9 @@ interface UserDao {
     @Query("SELECT * FROM users WHERE email = :email LIMIT 1")
     suspend fun getUserByEmail(email: String): User?
 
+    @Query("SELECT * FROM users WHERE firebaseUid = :firebaseUid LIMIT 1")
+    suspend fun getUserByFirebaseUid(firebaseUid: String): User?
+
     @Query("SELECT * FROM users WHERE id = :userId LIMIT 1")
     fun getUserById(userId: Long): Flow<User?>
 

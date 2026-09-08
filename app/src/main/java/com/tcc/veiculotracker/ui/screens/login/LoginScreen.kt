@@ -5,21 +5,19 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tcc.veiculotracker.ui.components.LoadingOverlay
+import android.app.Activity
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -29,9 +27,8 @@ fun LoginScreen(
     viewModel: LoginViewModel = viewModel()
 ) {
     val state by viewModel.state.collectAsState()
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var passwordVisible by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val activity = context as? Activity
 
     LaunchedEffect(state.isLoggedIn) {
         if (state.isLoggedIn) onLoginSuccess()
@@ -49,7 +46,7 @@ fun LoginScreen(
                 verticalArrangement = Arrangement.Center
             ) {
                 Text(
-                    text = "VeiculoTracker",
+                    text = "Securitas",
                     style = MaterialTheme.typography.headlineLarge,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -64,56 +61,76 @@ fun LoginScreen(
 
                 Spacer(modifier = Modifier.height(48.dp))
 
+                state.error?.let { error ->
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.1f)
+                        )
+                    ) {
+                        Text(
+                            text = error,
+                            modifier = Modifier.padding(12.dp),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
                 OutlinedTextField(
-                    value = email,
-                    onValueChange = { email = it },
-                    label = { Text("Email") },
-                    leadingIcon = { Icon(Icons.Default.Email, contentDescription = null) },
+                    value = state.email,
+                    onValueChange = viewModel::updateEmail,
                     modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                    singleLine = true
+                    enabled = !state.isLoading,
+                    label = { Text("Email") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = state.password,
+                    onValueChange = viewModel::updatePassword,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.isLoading,
+                    label = { Text("Senha") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text("Senha") },
-                    leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
-                    trailingIcon = {
-                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                            Icon(
-                                imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = if (passwordVisible) "Ocultar senha" else "Mostrar senha"
-                            )
-                        }
-                    },
-                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                Button(
+                    onClick = viewModel::loginWithEmail,
                     modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    singleLine = true
-                )
-
-                state.error?.let { error ->
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = error,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    enabled = !state.isLoading,
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    Text("Entrar", style = MaterialTheme.typography.labelLarge)
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                Button(
-                    onClick = { viewModel.login(email, password) },
+                HorizontalDivider()
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                OutlinedButton(
+                    onClick = { activity?.let { viewModel.signInWithGoogle(it) } },
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = !state.isLoading
+                    enabled = !state.isLoading,
+                    shape = MaterialTheme.shapes.medium
                 ) {
-                    Text("Entrar", style = MaterialTheme.typography.labelLarge)
+                    Icon(
+                        Icons.Default.AccountCircle,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text("Entrar com Google", style = MaterialTheme.typography.labelLarge)
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))

@@ -1,0 +1,120 @@
+================================================================================
+    VEICULOTRACKER - PRÓXIMOS PASSOS (INTEGRAÇÃO FIREBASE)
+================================================================================
+
+OBJETIVO
+--------------------------------------------------------------------------------
+Conectar o aplicativo ao Firebase (Cloud Firestore + Realtime Database), seguindo
+o plano híbrido descrito na documentação do projeto: SQLite local (Room) como fonte
+imediata da verdade + sincronização bidirecional com a nuvem.
+
+--------------------------------------------------------------------------------
+
+✅ 1. JÁ CONCLUÍDO
+--------------------------------------------------------------------------------
+[Feito] Adicionada dependência Firebase Firestore:
+        - gradle/libs.versions.toml: firebaseFirestore = "24.11.0"
+        - app/build.gradle.kts: implementation(libs.firebase.firestore)
+
+[Feito] Criado FirebaseDataSource.kt (camada remota):
+        Caminho: app/src/main/java/com/tcc/veiculotracker/data/remote/FirebaseDataSource.kt
+        Contém métodos para:
+        - Firestore: syncUser, getUserData, syncVehicle, deleteVehicle,
+          getVehiclesByUser (escutas em tempo real), syncRoute, deleteRoute,
+          getRoutesByUser (escutas em tempo real)
+        - Realtime DB: listenTelemetry, sendTelemetry, listenCommandResponse, sendCommand
+
+Este arquivo ainda NÃO está integrado aos repositórios/ViewModels do app.
+
+--------------------------------------------------------------------------------
+
+⏭️ 2. PRÓXIMOS PASSOS (IMPLEMENTAÇÃO DO CÓDIGO)
+--------------------------------------------------------------------------------
+(1) CRIAR SyncManager.kt
+    Caminho sugerido: app/src/main/java/com/tcc/veiculotracker/data/sync/SyncManager.kt
+    Responsabilidades:
+    - Sincronização bidirecional Room <-> Firestore para veículos e rotas.
+    - Escutar mudanças no Firestore e atualizar o Room localmente (e vice-versa).
+    - Encapsular FirebaseDataSource + DAOs.
+
+(2) ATUALIZAR AuthRepository.kt
+    - Ao registrar/atualizar usuário local, chamar firebaseDataSource.syncUser().
+    - Garantir que o ID local do usuário seja compartilhado com a nuvem.
+
+(3) ATUALIZAR VehicleRepository.kt
+    - Após insert/update/delete/updateLocation/setBlocked local, propagar para o
+      Firestore via syncVehicle()/deleteVehicle().
+    - Expor Flow de veículos que combine a fonte local (Room) com a remota (Firestore).
+
+(4) ATUALIZAR RouteRepository.kt
+    - Após inserir/finalizar/excluir rota local, propagar para o Firestore via
+      syncRoute()/deleteRoute().
+
+(5) ATUALIZAR TrackingViewModel.kt
+    - SUBSTITUIR a simulação de GPS (geração de valores aleatórios) pelo fluxo
+      real de telemetria do Firebase Realtime Database (listenTelemetry).
+    - Ao iniciar rastreamento: escutar /telemetry/{vehicleId} e atualizar Room
+      (vehicleRepository.updateLocation).
+    - Ao finalizar: opcionalmente enviar última posição via sendTelemetry.
+
+(6) ATUALIZAR RemoteControlViewModel.kt
+    - Ao bloquear/desbloquear: além de atualizar o Room, enviar comando via
+      Firebase Realtime Database (sendCommand no caminho /commands/{vehicleId}).
+    - Opcional: escutar confirmação do rastreador via listenCommandResponse.
+
+(7) ATUALIZAR VehicleViewModel.kt
+    - Após cadastrar um veículo local, propagar para o Firestore (syncVehicle).
+
+(8) ATUALIZAR App.kt / MainActivity.kt
+    - Inicializar Firebase (FirebaseApp.initializeApp) e instanciar FirebaseDataSource.
+    - Inicializar/acessar o SyncManager (se criado no passo 1).
+
+--------------------------------------------------------------------------------
+
+🧪 3. VALIDAÇÃO FINAL
+--------------------------------------------------------------------------------
+- Sincronizar o projeto no Android Studio (File -> Sync Project with Gradle Files).
+- Compilar: ./gradlew assembleDebug (ou pelo menu Build).
+- Garantir que google-services.json (projeto securitas-ce0bd) esteja presente
+  em app/google-services.json (já existe).
+- Configurar no console Firebase:
+  * Habilitar Cloud Firestore e criar coleções: users, vehicles, routes.
+  * Habilitar Firebase Realtime Database e criar caminhos: telemetry, commands.
+  * Regras de acesso adequadas (ao menos em modo de teste durante o desenvolvimento).
+
+--------------------------------------------------------------------------------
+
+📋 4. PENDÊNCIAS DE INFRAESTRUTURA
+--------------------------------------------------------------------------------
+- Regras de segurança do Firestore e Realtime Database.
+- Verificação de que a API "Maps SDK for Android" está habilitada no Google Cloud
+  (projeto securitas-ce0bd) para a futura tela de mapas (TrackingScreen/HistoryScreen).
+- O TrackingScreen ainda não navega para o Google Maps (atualmente não há o mapa
+  real no arquivo de rastreamento — verificar se o código de mapas será adicionado).
+
+--------------------------------------------------------------------------------
+
+🔐 GOOGLE SIGN-IN — CERTIFICADOS (SHA-1 / SHA-256)
+--------------------------------------------------------------------------------
+O login usou Firebase Auth + Credential Manager. Para funcionar, além do
+"Web client ID" (ver strings.xml -> google_web_client_id), é necessário cadastrar
+no Console Firebase (Project settings -> seu app Android) as impressões digitais
+do certificado de assinatura.
+
+Keystore usado (DEBUG): C:\Users\Admin\.android\debug.keystore (alias androiddebugkey)
+
+  SHA-1:
+    DA:AA:9F:34:EF:49:34:74:3D:D6:0D:A6:57:5D:42:BB:8C:4F:7C:F9
+
+  SHA-256:
+    78:AC:09:F9:36:54:C5:88:55:45:EE:A9:0A:20:C8:14:3F:22:42:B3:2E:13:EC:6E:89:87:ED:40:9A:B3:EF:F3
+
+Passos:
+1. Console Firebase -> projeto securitas-ce0bd -> Configurações do projeto -> seus apps
+   -> Android (com.tcc.veiculotracker) -> Adicionar impressão digital.
+2. Cole o SHA-1 e o SHA-256 acima (formato com ":" é aceito).
+3. Em Authentication -> Sign-in method -> Google, copie o "Web client ID"
+   (tipo WEB) e cole em app/src/main/res/values/strings.xml -> google_web_client_id.
+4. Para builds de RELEASE use o keystore de release e repita o registro dos hashes
+   (não há keystore de release configurado no projeto atualmente).
+================================================================================

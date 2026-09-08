@@ -4,9 +4,8 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.tcc.veiculotracker.data.local.AppDatabase
+import com.tcc.veiculotracker.App
 import com.tcc.veiculotracker.data.local.entity.User
-import com.tcc.veiculotracker.data.repository.AuthRepository
 import com.tcc.veiculotracker.util.Constants
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -23,8 +22,7 @@ data class SettingsState(
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val db = AppDatabase.getInstance(application)
-    private val authRepository = AuthRepository(db.userDao())
+    private val authRepository = (application as App).authRepository
     private val prefs = application.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
 
     private val _state = MutableStateFlow(SettingsState())
@@ -91,6 +89,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun logout() {
+        viewModelScope.launch {
+            authRepository.signOut()
+        }
         prefs.edit().clear().apply()
     }
 

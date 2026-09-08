@@ -8,7 +8,8 @@ data class User(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
     val email: String,
-    val password: String,
+    val password: String = "",
     val phone: String = "",
+    val firebaseUid: String = "",
     val createdAt: Long = System.currentTimeMillis()
 )

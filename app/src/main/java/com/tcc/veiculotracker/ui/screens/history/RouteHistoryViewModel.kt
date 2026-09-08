@@ -4,10 +4,9 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.tcc.veiculotracker.data.local.AppDatabase
+import com.tcc.veiculotracker.App
 import com.tcc.veiculotracker.data.local.entity.Route
 import com.tcc.veiculotracker.data.local.entity.RoutePoint
-import com.tcc.veiculotracker.data.repository.RouteRepository
 import com.tcc.veiculotracker.util.Constants
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -21,8 +20,7 @@ data class HistoryState(
 
 class RouteHistoryViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val db = AppDatabase.getInstance(application)
-    private val routeRepository = RouteRepository(db.routeDao())
+    private val routeRepository = (application as App).routeRepository
     private val prefs = application.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
 
     private val _state = MutableStateFlow(HistoryState())

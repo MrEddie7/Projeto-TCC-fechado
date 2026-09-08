@@ -1,12 +1,11 @@
+
 package com.tcc.veiculotracker.ui.screens.register
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.tcc.veiculotracker.data.local.AppDatabase
-import com.tcc.veiculotracker.data.local.entity.User
-import com.tcc.veiculotracker.data.repository.AuthRepository
-import com.tcc.veiculotracker.util.Resource
+import com.google.firebase.auth.FirebaseAuthUserCollisionException
+import com.tcc.veiculotracker.App
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -19,8 +18,7 @@ data class RegisterState(
 
 class RegisterViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val db = AppDatabase.getInstance(application)
-    private val repository = AuthRepository(db.userDao())
+    private val repository = (application as App).authRepository
 
     private val _state = MutableStateFlow(RegisterState())
     val state: StateFlow<RegisterState> = _state
@@ -44,14 +42,15 @@ class RegisterViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             _state.value = _state.value.copy(isLoading = true, error = null)
             try {
-                val user = User(
+                repository.registerWithEmail(
                     name = name.trim(),
                     email = email.trim().lowercase(),
                     password = password,
                     phone = phone.trim()
                 )
-                repository.register(user)
                 _state.value = RegisterState(isRegistered = true)
+            } catch (e: FirebaseAuthUserCollisionException) {
+                _state.value = RegisterState(error = "Este email já está cadastrado. Faça login.")
             } catch (e: Exception) {
                 _state.value = RegisterState(error = e.message ?: "Erro ao registrar")
             }

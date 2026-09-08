@@ -105,7 +105,7 @@ fun DashboardScreen(
                         style = MaterialTheme.typography.titleLarge
                     )
                     TextButton(onClick = onNavigateToRemoteControl) {
-                        Icon(Icons.Default.RemoteTv, contentDescription = null)
+                        Icon(Icons.Default.SettingsRemote, contentDescription = null)
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Controle Remoto")
                     }

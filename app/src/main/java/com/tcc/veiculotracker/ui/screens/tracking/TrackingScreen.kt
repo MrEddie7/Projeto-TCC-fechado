@@ -4,15 +4,18 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.tcc.veiculotracker.ui.components.TrackingMap
 import com.tcc.veiculotracker.ui.theme.Active
 import com.tcc.veiculotracker.ui.theme.Blocked
 import com.tcc.veiculotracker.ui.theme.Warning
@@ -23,11 +26,19 @@ fun TrackingScreen(
     viewModel: TrackingViewModel = viewModel()
 ) {
     val state by viewModel.state.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(state.error) {
+        state.error?.let {
+            snackbarHostState.showSnackbar(it)
+        }
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(title = { Text("Rastreamento") })
-        }
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         Column(
             modifier = Modifier
@@ -134,6 +145,27 @@ fun TrackingScreen(
             }
 
             Spacer(modifier = Modifier.height(8.dp))
+
+            if (state.selectedVehicle != null) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .clip(RoundedCornerShape(16.dp)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                ) {
+                    TrackingMap(
+                        latitude = state.currentLatitude,
+                        longitude = state.currentLongitude,
+                        animate = state.isTracking,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(240.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+            }
 
             Text(
                 text = "Selecione um veículo para rastrear",

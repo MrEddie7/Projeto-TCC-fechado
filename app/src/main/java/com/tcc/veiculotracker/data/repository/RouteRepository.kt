@@ -3,9 +3,13 @@ package com.tcc.veiculotracker.data.repository
 import com.tcc.veiculotracker.data.local.dao.RouteDao
 import com.tcc.veiculotracker.data.local.entity.Route
 import com.tcc.veiculotracker.data.local.entity.RoutePoint
+import com.tcc.veiculotracker.data.sync.SyncManager
 import kotlinx.coroutines.flow.Flow
 
-class RouteRepository(private val routeDao: RouteDao) {
+class RouteRepository(
+    private val routeDao: RouteDao,
+    private val syncManager: SyncManager
+) {
 
     fun getRoutesByUser(userId: Long): Flow<List<Route>> {
         return routeDao.getRoutesByUser(userId)
@@ -24,11 +28,14 @@ class RouteRepository(private val routeDao: RouteDao) {
     }
 
     suspend fun startRoute(route: Route): Long {
-        return routeDao.insertRoute(route)
+        val id = routeDao.insertRoute(route)
+        syncManager.syncRoute(route.copy(id = id))
+        return id
     }
 
     suspend fun endRoute(route: Route) {
         routeDao.updateRoute(route)
+        syncManager.syncRoute(route)
     }
 
     suspend fun addRoutePoint(point: RoutePoint): Long {
@@ -38,5 +45,6 @@ class RouteRepository(private val routeDao: RouteDao) {
     suspend fun deleteRoute(route: Route) {
         routeDao.deleteRoutePoints(route.id)
         routeDao.deleteRoute(route)
+        syncManager.deleteRoute(route.id)
     }
 }

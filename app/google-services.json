@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "35252490635",
+    "firebase_url": "https://securitas-ce0bd-default-rtdb.firebaseio.com",
+    "project_id": "securitas-ce0bd",
+    "storage_bucket": "securitas-ce0bd.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:35252490635:android:290febda5448d396839f8e",
+        "android_client_info": {
+          "package_name": "com.tcc.veiculotracker"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "35252490635-dr0plcuk459frio6kif8ai2gc3qmddoi.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.tcc.veiculotracker",
+            "certificate_hash": "daaa9f34ef4934743dd60da6575d42bb8c4f7cf9"
+          }
+        },
+        {
+          "client_id": "35252490635-e5kpel0npkndurl81n431c7gdcjhbl67.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAjUO39aSqfWjNANzLQvJ8Xau3SBBodf1I"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "35252490635-e5kpel0npkndurl81n431c7gdcjhbl67.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

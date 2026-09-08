@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="default_web_client_id" translatable="false">35252490635-e5kpel0npkndurl81n431c7gdcjhbl67.apps.googleusercontent.com</string>
+    <string name="firebase_database_url" translatable="false">https://securitas-ce0bd-default-rtdb.firebaseio.com</string>
+    <string name="gcm_defaultSenderId" translatable="false">35252490635</string>
+    <string name="google_api_key" translatable="false">AIzaSyAjUO39aSqfWjNANzLQvJ8Xau3SBBodf1I</string>
+    <string name="google_app_id" translatable="false">1:35252490635:android:290febda5448d396839f8e</string>
+    <string name="google_crash_reporting_api_key" translatable="false">AIzaSyAjUO39aSqfWjNANzLQvJ8Xau3SBBodf1I</string>
+    <string name="google_storage_bucket" translatable="false">securitas-ce0bd.firebasestorage.app</string>
+    <string name="project_id" translatable="false">securitas-ce0bd</string>
+</resources>

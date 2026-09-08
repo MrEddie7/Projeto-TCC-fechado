@@ -38,7 +38,7 @@ fun RemoteControlScreen(
                 title = { Text("Controle Remoto") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar")
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Voltar")
                     }
                 }
             )
