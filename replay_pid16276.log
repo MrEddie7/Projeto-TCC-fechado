@@ -24,7 +24,8 @@ instanceKlass com/sun/jna/Structure$1
 instanceKlass com/sun/jna/Native$7
 instanceKlass com/sun/xml/bind/v2/ClassFactory$1
 instanceKlass org/gradle/internal/exceptions/DefaultMultiCauseException$HideStacktrace
-instanceKlass com/sun/xml/bind/v2/ClassFactory$1
+instancpy -m venv .venv
+eKlass com/sun/xml/bind/v2/ClassFactory$1
 instanceKlass org/jetbrains/kotlin/com/intellij/util/io/IOUtil$1
 instanceKlass jdk/internal/jimage/ImageBufferCache$1
 instanceKlass org/jetbrains/kotlin/load/kotlin/KotlinBinaryClassCache$cache$1
