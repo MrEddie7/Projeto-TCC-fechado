@@ -7,6 +7,9 @@ import telemetryRoutes from './routes/telemetry.routes.js';
 import commandsRoutes from './routes/commands.routes.js';
 import routesRoutes from './routes/routes.routes.js';
 import hardwareRoutes from './routes/hardware.routes.js';
+import { syncOnce } from './services/firebase-sync.service.js';
+import { requireAuth } from './middleware/auth.js';
+import { db } from './db/database.js';
 
 export function createApp() {
   const app = express();
@@ -39,6 +42,22 @@ export function createApp() {
   app.use('/v1/vehicles', commandsRoutes);
   app.use('/v1', routesRoutes);
   app.use('/v1/hardware', hardwareRoutes);
+
+  // Força uma rodada de sincronização SQLite -> Firebase manualmente
+  app.post('/v1/admin/sync', requireAuth, async (req, res) => {
+    const result = await syncOnce();
+    res.json({ ok: true, ...result });
+  });
+
+  // Status da sincronização
+  app.get('/v1/admin/sync-status', requireAuth, (_req, res) => {
+    const row = db.prepare("SELECT value FROM sync_state WHERE key = 'last_run'").get();
+    res.json({
+      enabled: config.firebaseSyncEnabled,
+      intervalMs: config.firebaseSyncIntervalMs,
+      lastRun: row ? Number(row.value) : null,
+    });
+  });
 
   app.use(notFound);
   app.use(errorHandler);

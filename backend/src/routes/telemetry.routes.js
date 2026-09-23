@@ -6,7 +6,6 @@ import { HttpError } from '../util/http-error.js';
 import { subscribeVehicle, publishToVehicle } from '../realtime/sse.js';
 
 const router = Router();
-router.use(requireAuth);
 
 function assertOwnsVehicle(userId, vehicleId) {
   const v = db.prepare('SELECT * FROM vehicles WHERE id = ? AND user_id = ?').get(vehicleId, userId);
@@ -16,7 +15,8 @@ function assertOwnsVehicle(userId, vehicleId) {
 
 // Última posição conhecida do veículo
 router.get(
-  '/:vehicleId/latest',
+  '/:vehicleId/telemetry/latest',
+  requireAuth,
   asyncHandler(async (req, res) => {
     const v = assertOwnsVehicle(req.user.id, req.params.vehicleId);
     const last = db
@@ -51,7 +51,8 @@ router.get(
 
 // Histórico recente (limitado por ?limit=)
 router.get(
-  '/:vehicleId/history',
+  '/:vehicleId/telemetry/history',
+  requireAuth,
   asyncHandler(async (req, res) => {
     const v = assertOwnsVehicle(req.user.id, req.params.vehicleId);
     const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
@@ -87,7 +88,7 @@ router.get(
 
 // Stream em tempo real via SSE (Server-Sent Events).
 // Eventos: `telemetry`, `blocked`, `command`.
-router.get('/:vehicleId/stream', (req, res, next) => {
+router.get('/:vehicleId/telemetry/stream', requireAuth, (req, res, next) => {
   try {
     assertOwnsVehicle(req.user.id, req.params.vehicleId);
   } catch (e) {

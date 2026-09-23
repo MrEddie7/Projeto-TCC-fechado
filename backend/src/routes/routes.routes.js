@@ -5,7 +5,6 @@ import { asyncHandler } from '../middleware/error.js';
 import { HttpError } from '../util/http-error.js';
 
 const router = Router();
-router.use(requireAuth);
 
 function serializeRoute(r) {
   return {
@@ -44,6 +43,7 @@ function assertOwnsRoute(userId, routeId) {
 // Iniciar rota (o hardware começa a acumular pontos assim que a telemetria chegar)
 router.post(
   '/vehicles/:vehicleId/routes/start',
+  requireAuth,
   asyncHandler(async (req, res) => {
     const v = assertOwnsVehicle(req.user.id, req.params.vehicleId);
     const active = db
@@ -69,6 +69,7 @@ router.post(
 // Finalizar rota em andamento
 router.post(
   '/vehicles/:vehicleId/routes/stop',
+  requireAuth,
   asyncHandler(async (req, res) => {
     const v = assertOwnsVehicle(req.user.id, req.params.vehicleId);
     const active = db
@@ -91,6 +92,7 @@ router.post(
 // Listar rotas de um veículo
 router.get(
   '/vehicles/:vehicleId/routes',
+  requireAuth,
   asyncHandler(async (req, res) => {
     const v = assertOwnsVehicle(req.user.id, req.params.vehicleId);
     const rows = db
@@ -103,6 +105,7 @@ router.get(
 // Listar rotas de todos os veículos do usuário
 router.get(
   '/routes',
+  requireAuth,
   asyncHandler(async (req, res) => {
     const { status } = req.query;
     const rows = status
@@ -125,6 +128,7 @@ router.get(
 // Detalhe da rota + pontos geográficos (para desenhar a polyline no mapa)
 router.get(
   '/routes/:routeId',
+  requireAuth,
   asyncHandler(async (req, res) => {
     const r = assertOwnsRoute(req.user.id, req.params.routeId);
     const points = db
@@ -149,6 +153,7 @@ router.get(
 // Excluir rota
 router.delete(
   '/routes/:routeId',
+  requireAuth,
   asyncHandler(async (req, res) => {
     const r = assertOwnsRoute(req.user.id, req.params.routeId);
     db.prepare('DELETE FROM route_points WHERE route_id = ?').run(Number(r.id));

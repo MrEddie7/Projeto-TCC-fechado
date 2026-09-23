@@ -37,14 +37,14 @@ export function getFirebase() {
       if (existing) deleteApp(existing);
       const app = initializeApp(appOptions);
 
-      // O app Android usa FirebaseFirestore.getInstance("securitas"):
-      // uma instância nomeada do Firestore. firebase-admin suporta
-      // databaseId customizado no getFirestore(app, { databaseId }).
+// O app Android usa FirebaseFirestore.getInstance("securitas"):
+// uma instância nomeada do Firestore. O SDK Admin recebe o
+// databaseId como 2º argumento de getFirestore(app, databaseId).
       let firestore;
       try {
-        firestore = getFirestore(app, { databaseId: config.firestoreId });
+        firestore = getFirestore(app, config.firestoreId);
       } catch {
-        firestore = getFirestore(app, { databaseId: '(default)' });
+        firestore = getFirestore(app, '(default)');
       }
 
       const rtdb = config.firebaseDatabaseUrl ? getDatabase(app) : null;
