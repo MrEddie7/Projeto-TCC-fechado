@@ -105,4 +105,20 @@ CREATE TABLE IF NOT EXISTS commands (
 CREATE INDEX IF NOT EXISTS idx_telemetry_vehicle_ts ON telemetry(vehicle_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_route_points_route ON route_points(route_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_commands_vehicle_status ON commands(vehicle_id, status);
+
+CREATE TABLE IF NOT EXISTS sync_state (
+  key   TEXT PRIMARY KEY,
+  value INTEGER NOT NULL
+);
 `);
+
+// Migração: garante a coluna updated_at (usada pela sincronização Firebase).
+function ensureColumn(table, column, ddl) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl};`);
+  }
+}
+ensureColumn('users', 'updated_at', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('vehicles', 'updated_at', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('routes', 'updated_at', 'INTEGER NOT NULL DEFAULT 0');

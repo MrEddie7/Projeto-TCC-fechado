@@ -77,10 +77,9 @@ export function acknowledgeCommand(device, commandId, { ok, note }) {
   // Ao confirmar block/unblock, reflete o estado físico no veículo e notifica o app.
   if (ok && (cmd.command === 'block' || cmd.command === 'unblock')) {
     const blocked = cmd.command === 'block' ? 1 : 0;
-    db.prepare('UPDATE vehicles SET is_blocked = ? WHERE id = ?').run(
-      blocked,
-      Number(cmd.vehicle_id)
-    );
+    db.prepare(
+      'UPDATE vehicles SET is_blocked = ?, updated_at = ? WHERE id = ?'
+    ).run(blocked, Date.now(), Number(cmd.vehicle_id));
     publishToVehicle(Number(cmd.vehicle_id), 'blocked', {
       vehicleId: Number(cmd.vehicle_id),
       isBlocked: blocked === 1,

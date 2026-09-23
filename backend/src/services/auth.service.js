@@ -52,9 +52,9 @@ export function createUser({ name, email, phone, password }) {
   const createdAt = Date.now();
   const info = db
     .prepare(
-      'INSERT INTO users (name, email, phone, password_hash, created_at) VALUES (?, ?, ?, ?, ?)'
+      'INSERT INTO users (name, email, phone, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
     )
-    .run(name, email, phone || '', passwordHash, createdAt);
+    .run(name, email, phone || '', passwordHash, createdAt, createdAt);
   return { id: Number(info.lastInsertRowid), name, email, phone: phone || '', createdAt };
 }
 

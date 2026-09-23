@@ -37,9 +37,9 @@ export function ingestTelemetry({ device, latitude, longitude, speed, heading, b
 
     db.prepare(
       `UPDATE vehicles
-       SET latitude = ?, longitude = ?, speed = ?, last_update = ?
+       SET latitude = ?, longitude = ?, speed = ?, last_update = ?, updated_at = ?
        WHERE id = ?`
-    ).run(lat, lng, normSpeed, ts, vehicleId);
+    ).run(lat, lng, normSpeed, ts, Date.now(), vehicleId);
 
     appendToActiveRoute(vehicleId, lat, lng, normSpeed, heading || 0, ts);
 
@@ -83,7 +83,7 @@ function appendToActiveRoute(vehicleId, lat, lng, speed, heading, ts) {
 
   db.prepare(
     `UPDATE routes SET distance = ?, max_speed = MAX(max_speed, ?),
-       end_latitude = ?, end_longitude = ?
+       end_latitude = ?, end_longitude = ?, updated_at = ?
      WHERE id = ?`
-  ).run(distance, speed, lat, lng, Number(route.id));
+  ).run(distance, speed, lat, lng, Date.now(), Number(route.id));
 }

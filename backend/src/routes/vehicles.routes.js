@@ -33,6 +33,7 @@ function serializeDevice(row) {
   return {
     id: Number(row.id),
     deviceId: row.device_id,
+    apiKey: row.api_key,
     vehicleId: row.vehicle_id === null ? null : Number(row.vehicle_id),
     firmware: row.firmware,
     model: row.model,
@@ -96,10 +97,10 @@ router.post(
     const now = Date.now();
     const info = db
       .prepare(
-        `INSERT INTO vehicles (user_id, plate, model, brand, year, color, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO vehicles (user_id, plate, model, brand, year, color, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(req.user.id, plateStr, model.trim(), brand.trim(), yearNum, color?.trim() || '', now);
+      .run(req.user.id, plateStr, model.trim(), brand.trim(), yearNum, color?.trim() || '', now, now);
     const v = db.prepare('SELECT * FROM vehicles WHERE id = ?').get(Number(info.lastInsertRowid));
     res.status(201).json({ vehicle: serializeVehicle(v) });
   })
@@ -117,13 +118,14 @@ router.put(
     }
     const yearNum = year === undefined ? Number(v.year) : Number(year);
     db.prepare(
-      `UPDATE vehicles SET plate = ?, model = ?, brand = ?, year = ?, color = ? WHERE id = ?`
+      `UPDATE vehicles SET plate = ?, model = ?, brand = ?, year = ?, color = ?, updated_at = ? WHERE id = ?`
     ).run(
       plateStr,
       model?.trim() || v.model,
       brand?.trim() || v.brand,
       yearNum,
       color?.trim() ?? v.color,
+      Date.now(),
       v.id
     );
     const updated = db.prepare('SELECT * FROM vehicles WHERE id = ?').get(v.id);

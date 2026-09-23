@@ -57,10 +57,10 @@ router.post(
     const now = Date.now();
     const info = db
       .prepare(
-        `INSERT INTO routes (vehicle_id, user_id, start_latitude, start_longitude, start_time, status)
-         VALUES (?, ?, ?, ?, ?, 'em_andamento')`
+        `INSERT INTO routes (vehicle_id, user_id, start_latitude, start_longitude, start_time, status, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'em_andamento', ?)`
       )
-      .run(v.id, req.user.id, v.latitude, v.longitude, now);
+      .run(v.id, req.user.id, v.latitude, v.longitude, now, now);
     const route = db.prepare('SELECT * FROM routes WHERE id = ?').get(Number(info.lastInsertRowid));
     res.status(201).json({ route: serializeRoute(route) });
   })
@@ -80,9 +80,9 @@ router.post(
     const now = Date.now();
     db.prepare(
       `UPDATE routes SET status = 'concluida', end_time = ?,
-        end_latitude = ?, end_longitude = ?
+        end_latitude = ?, end_longitude = ?, updated_at = ?
        WHERE id = ?`
-    ).run(now, v.latitude, v.longitude, Number(active.id));
+    ).run(now, v.latitude, v.longitude, now, Number(active.id));
     const route = db.prepare('SELECT * FROM routes WHERE id = ?').get(Number(active.id));
     res.json({ route: serializeRoute(route) });
   })

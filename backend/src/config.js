@@ -40,4 +40,14 @@ export const config = {
   simulatorStartLat: toFloat(process.env.SIMULATOR_START_LAT, -23.5505),
   simulatorStartLng: toFloat(process.env.SIMULATOR_START_LNG, -46.6333),
   logRequests: (process.env.LOG_REQUESTS || 'true').toLowerCase() === 'true',
+
+  // ── Sincronização SQLite -> Firebase ──────────────────────────────────
+  firebaseSyncEnabled: (process.env.FIREBASE_SYNC_ENABLED || 'false').toLowerCase() === 'true',
+  firebaseSyncIntervalMs: toInt(process.env.FIREBASE_SYNC_INTERVAL_MS, 60000),
+  firebaseServiceAccount: process.env.FIREBASE_SERVICE_ACCOUNT
+    ? path.resolve(__dirname, '..', process.env.FIREBASE_SERVICE_ACCOUNT)
+    : null,
+  firebaseDatabaseUrl: process.env.FIREBASE_DATABASE_URL || '',
+  // Apelido do banco no Firestore ("securitas" no app Android).
+  firestoreId: process.env.FIRESTORE_ID || 'securitas',
 };
