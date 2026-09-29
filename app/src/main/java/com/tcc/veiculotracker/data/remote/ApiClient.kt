@@ -94,6 +94,23 @@ class ApiClient(private val context: Context) {
         return post("/v1/auth/logout", emptyMap()).map { true }
     }
 
+    /**
+     * Envia a localização do celular para o backend.
+     * Usado pelo LocationService para rastrear o dispositivo do usuário.
+     */
+    suspend fun sendMobileLocation(latitude: Double, longitude: Double, speed: Double, heading: Double, accuracy: Double): Result<Boolean> {
+        val body = mapOf(
+            "latitude" to latitude,
+            "longitude" to longitude,
+            "speed" to speed,
+            "heading" to heading,
+            "accuracy" to accuracy,
+            "timestamp" to System.currentTimeMillis(),
+            "source" to "mobile_app"
+        )
+        return post("/v1/mobile/location", body).map { true }
+    }
+
     // ── Veículos ──────────────────────────────────────────────────────────
 
     data class VehicleDto(

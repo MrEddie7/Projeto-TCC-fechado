@@ -73,6 +73,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.gson)
     implementation(libs.okhttp)
+    implementation(libs.play.services.location)
 
     debugImplementation(libs.androidx.ui.tooling)
 }

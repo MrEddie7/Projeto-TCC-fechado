@@ -4,7 +4,7 @@
             "outputFile": "com.tcc.veiculotracker.app-mergeDebugResources-68:/values-xlarge-v4/values-xlarge-v4.xml",
             "map": [
                 {
-                    "source": "C:\\Users\\Admin\\.gradle\\caches\\9.4.1\\transforms\\c23fdd5bef6341fff007c1f236a37690\\transformed\\appcompat-1.2.0\\res\\values-xlarge-v4\\values-xlarge-v4.xml",
+                    "source": "C:\\Users\\Admin\\.gradle\\caches\\9.4.1\\transforms\\0b8dd164fd4132c85686ce19781fe5f6\\transformed\\appcompat-1.2.0\\res\\values-xlarge-v4\\values-xlarge-v4.xml",
                     "from": {
                         "startLines": "2,3,4,5,6,7",
                         "startColumns": "4,4,4,4,4,4",

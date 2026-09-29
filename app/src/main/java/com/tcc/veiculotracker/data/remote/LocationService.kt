@@ -117,25 +117,12 @@ class LocationService(private val context: Context) {
         apiClient: ApiClient,
         location: Location
     ): Result<Boolean> {
-        return try {
-            // A localização do celular é enviada como telemetria especial
-            // O backend pode associar ao usuário ou a um "dispositivo móvel"
-            val body = mapOf(
-                "latitude" to location.latitude,
-                "longitude" to location.longitude,
-                "speed" to location.speed.toDouble(),
-                "heading" to location.bearing.toDouble(),
-                "accuracy" to location.accuracy.toDouble(),
-                "timestamp" to System.currentTimeMillis(),
-                "source" to "mobile_app"
-            )
-            // Usa o endpoint de telemetria do hardware com device especial
-            // ou um endpoint dedicado para o app
-            apiClient.post("/v1/mobile/location", body, auth = true)
-            Result.success(true)
-        } catch (e: Exception) {
-            Log.e(TAG, "Erro ao enviar localização: ${e.message}")
-            Result.failure(e)
-        }
+        return apiClient.sendMobileLocation(
+            latitude = location.latitude,
+            longitude = location.longitude,
+            speed = location.speed.toDouble(),
+            heading = location.bearing.toDouble(),
+            accuracy = location.accuracy.toDouble()
+        )
     }
 }

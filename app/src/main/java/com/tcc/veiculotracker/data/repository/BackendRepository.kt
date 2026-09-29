@@ -20,7 +20,7 @@ class BackendRepository(
     private val context: Context,
     private val vehicleDao: VehicleDao
 ) {
-    val apiClient = ApiClient(context)
+    val apiClient: ApiClient = ApiClient(context)
     private val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
 
     companion object {
@@ -49,7 +49,7 @@ class BackendRepository(
     suspend fun register(name: String, email: String, password: String, phone: String): Result<ApiClient.UserDto> {
         val result = apiClient.register(name, email, password, phone)
         result.onSuccess { auth ->
-            apiClient.saveAuthToken(auth.token)
+            apiClient.authToken = auth.token
             prefs.edit().putLong(Constants.KEY_USER_ID, auth.user.id).apply()
             prefs.edit().putString(Constants.KEY_USER_NAME, auth.user.name).apply()
             prefs.edit().putString(Constants.KEY_USER_EMAIL, auth.user.email).apply()
@@ -60,7 +60,7 @@ class BackendRepository(
     suspend fun login(email: String, password: String): Result<ApiClient.UserDto> {
         val result = apiClient.login(email, password)
         result.onSuccess { auth ->
-            apiClient.saveAuthToken(auth.token)
+            apiClient.authToken = auth.token
             prefs.edit().putLong(Constants.KEY_USER_ID, auth.user.id).apply()
             prefs.edit().putString(Constants.KEY_USER_NAME, auth.user.name).apply()
             prefs.edit().putString(Constants.KEY_USER_EMAIL, auth.user.email).apply()
