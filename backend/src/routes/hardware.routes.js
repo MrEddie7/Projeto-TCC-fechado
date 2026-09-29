@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db/database.js';
-import { requireDevice } from '../middleware/auth.js';
+import { requireAuth, requireDevice } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/error.js';
 import { HttpError } from '../util/http-error.js';
 import { ingestTelemetry } from '../services/telemetry.service.js';
