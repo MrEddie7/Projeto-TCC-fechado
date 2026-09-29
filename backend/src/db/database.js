@@ -110,6 +110,21 @@ CREATE TABLE IF NOT EXISTS sync_state (
   key   TEXT PRIMARY KEY,
   value INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS mobile_locations (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  latitude   REAL NOT NULL,
+  longitude  REAL NOT NULL,
+  speed      REAL NOT NULL DEFAULT 0,
+  heading    REAL NOT NULL DEFAULT 0,
+  accuracy   REAL DEFAULT 0,
+  timestamp  INTEGER NOT NULL,
+  source     TEXT DEFAULT 'mobile_app',
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_mobile_locations_user_ts ON mobile_locations(user_id, timestamp);
 `);
 
 // Migração: garante a coluna updated_at (usada pela sincronização Firebase).

@@ -112,4 +112,88 @@ router.get(
   })
 );
 
+// POST /v1/mobile/location
+// Recebe a localização do celular do usuário (app Android).
+// Headers: Authorization: Bearer <token>
+// Body: { latitude, longitude, speed, heading, accuracy, timestamp, source }
+router.post(
+  '/mobile/location',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { latitude, longitude, speed, heading, accuracy, timestamp, source } = req.body || {};
+    if (latitude === undefined || longitude === undefined) {
+      throw new HttpError(400, 'Informe latitude e longitude no corpo da requisição');
+    }
+    if (
+      typeof latitude !== 'number' ||
+      typeof longitude !== 'number' ||
+      latitude < -90 ||
+      latitude > 90 ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
+      throw new HttpError(400, 'Coordenadas inválidas');
+    }
+    const now = Date.now();
+    const info = db
+      .prepare(
+        `INSERT INTO mobile_locations (user_id, latitude, longitude, speed, heading, accuracy, timestamp, source, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        req.user.id,
+        latitude,
+        longitude,
+        speed || 0,
+        heading || 0,
+        accuracy || 0,
+        timestamp || now,
+        source || 'mobile_app',
+        now
+      );
+    const location = db.prepare('SELECT * FROM mobile_locations WHERE id = ?').get(Number(info.lastInsertRowid));
+    res.status(201).json({
+      ok: true,
+      location: {
+        id: Number(location.id),
+        userId: Number(location.user_id),
+        latitude: location.latitude,
+        longitude: location.longitude,
+        speed: location.speed,
+        heading: location.heading,
+        accuracy: location.accuracy,
+        timestamp: Number(location.timestamp),
+        source: location.source,
+      },
+    });
+  })
+);
+
+// GET /v1/mobile/location/latest
+// Retorna a última localização do celular do usuário.
+router.get(
+  '/mobile/location/latest',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const location = db
+      .prepare('SELECT * FROM mobile_locations WHERE user_id = ? ORDER BY timestamp DESC LIMIT 1')
+      .get(req.user.id);
+    res.json({
+      location: location
+        ? {
+            id: Number(location.id),
+            userId: Number(location.user_id),
+            latitude: location.latitude,
+            longitude: location.longitude,
+            speed: location.speed,
+            heading: location.heading,
+            accuracy: location.accuracy,
+            timestamp: Number(location.timestamp),
+            source: location.source,
+          }
+        : null,
+    });
+  })
+);
+
 export default router;

@@ -3,8 +3,10 @@ package com.tcc.veiculotracker
 import android.app.Application
 import com.tcc.veiculotracker.data.local.AppDatabase
 import com.tcc.veiculotracker.data.remote.FirebaseDataSource
+import com.tcc.veiculotracker.data.remote.LocationService
 import com.tcc.veiculotracker.data.repository.ApiConfigRepository
 import com.tcc.veiculotracker.data.repository.AuthRepository
+import com.tcc.veiculotracker.data.repository.BackendRepository
 import com.tcc.veiculotracker.data.repository.RouteRepository
 import com.tcc.veiculotracker.data.repository.VehicleRepository
 import com.tcc.veiculotracker.data.sync.SyncManager
@@ -16,7 +18,7 @@ class App : Application() {
 
     val firebaseDataSource: FirebaseDataSource by lazy { FirebaseDataSource() }
 
-    val syncManager: SyncManager by lazy { SyncManager(firebaseDataSource, database) }
+    val syncManager: SyncManager by lazy { SyncManager(firebaseDataSource, database, backendRepository) }
 
     val authRepository: AuthRepository by lazy { AuthRepository(database.userDao(), syncManager) }
 
@@ -27,6 +29,12 @@ class App : Application() {
     val routeRepository: RouteRepository by lazy { RouteRepository(database.routeDao(), syncManager) }
 
     val apiConfigRepository: ApiConfigRepository by lazy { ApiConfigRepository(database.apiConfigDao()) }
+
+    val backendRepository: BackendRepository by lazy {
+        BackendRepository(this@App, database.vehicleDao())
+    }
+
+    val locationService: LocationService by lazy { LocationService(this@App) }
 
     override fun onCreate() {
         super.onCreate()

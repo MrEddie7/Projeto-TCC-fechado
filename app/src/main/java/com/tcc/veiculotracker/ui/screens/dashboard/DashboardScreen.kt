@@ -20,6 +20,7 @@ fun DashboardScreen(
     onNavigateToVehicleRegister: () -> Unit,
     onNavigateToRemoteControl: () -> Unit,
     onNavigateToApiLink: () -> Unit,
+    onNavigateToDeviceLocation: () -> Unit,
     onNavigateToVehicleDetail: (Long) -> Unit,
     viewModel: DashboardViewModel = viewModel()
 ) {
@@ -30,6 +31,9 @@ fun DashboardScreen(
             TopAppBar(
                 title = { Text("Dashboard") },
                 actions = {
+                    IconButton(onClick = onNavigateToDeviceLocation) {
+                        Icon(Icons.Default.MyLocation, contentDescription = "Localização do Celular")
+                    }
                     IconButton(onClick = onNavigateToApiLink) {
                         Icon(Icons.Default.Link, contentDescription = "API")
                     }

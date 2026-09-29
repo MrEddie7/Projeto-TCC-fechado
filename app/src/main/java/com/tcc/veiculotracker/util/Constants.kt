@@ -9,4 +9,6 @@ object Constants {
     const val KEY_DARK_MODE = "dark_mode"
     const val KEY_NOTIFICATIONS = "notifications_enabled"
     const val KEY_TRACKING_INTERVAL = "tracking_interval"
+    const val KEY_API_URL = "api_url"
+    const val KEY_API_TOKEN = "api_token"
 }

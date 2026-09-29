@@ -4,7 +4,9 @@ import com.tcc.veiculotracker.data.local.AppDatabase
 import com.tcc.veiculotracker.data.local.entity.Route
 import com.tcc.veiculotracker.data.local.entity.User
 import com.tcc.veiculotracker.data.local.entity.Vehicle
+import com.tcc.veiculotracker.data.remote.ApiClient
 import com.tcc.veiculotracker.data.remote.FirebaseDataSource
+import com.tcc.veiculotracker.data.repository.BackendRepository
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -17,7 +19,8 @@ import kotlinx.coroutines.flow.Flow
  */
 class SyncManager(
     val firebaseDataSource: FirebaseDataSource,
-    private val db: AppDatabase
+    private val db: AppDatabase,
+    val backendRepository: BackendRepository? = null
 ) {
 
     // ── Usuários ─────────────────────────────────────────────────────────
@@ -82,6 +85,73 @@ class SyncManager(
 
     fun listenCommandResponse(vehicleId: Long): Flow<FirebaseDataSource.RemoteCommand> {
         return firebaseDataSource.listenCommandResponse(vehicleId.toString())
+    }
+
+    // ── Backend (Node.js API) ────────────────────────────────────────────
+
+    /**
+     * Sincroniza veículos do backend para o banco local.
+     * O backend é a fonte da verdade para veículos, telemetria e comandos.
+     */
+    suspend fun syncVehiclesFromBackend(): Result<Int> {
+        return backendRepository?.syncVehiclesFromBackend()
+            ?: Result.failure(IllegalStateException("BackendRepository não configurado"))
+    }
+
+    /**
+     * Envia comando para o backend (que o hardware vai buscar via polling).
+     */
+    suspend fun sendCommandToBackend(vehicleId: Long, command: String, note: String? = null): Result<ApiClient.CommandDto> {
+        return backendRepository?.sendCommand(vehicleId, command, note)
+            ?: Result.failure(IllegalStateException("BackendRepository não configurado"))
+    }
+
+    /**
+     * Busca a última telemetria do veículo no backend.
+     */
+    suspend fun getLatestTelemetryFromBackend(vehicleId: Long): Result<ApiClient.TelemetryDto?> {
+        return backendRepository?.getLatestTelemetry(vehicleId)
+            ?: Result.failure(IllegalStateException("BackendRepository não configurado"))
+    }
+
+    /**
+     * Busca o histórico de telemetria do veículo no backend.
+     */
+    suspend fun getTelemetryHistoryFromBackend(vehicleId: Long, limit: Int = 100): Result<List<ApiClient.TelemetryDto>> {
+        return backendRepository?.getTelemetryHistory(vehicleId, limit)
+            ?: Result.failure(IllegalStateException("BackendRepository não configurado"))
+    }
+
+    /**
+     * Inicia uma rota no backend.
+     */
+    suspend fun startRouteInBackend(vehicleId: Long): Result<ApiClient.RouteDto> {
+        return backendRepository?.startRoute(vehicleId)
+            ?: Result.failure(IllegalStateException("BackendRepository não configurado"))
+    }
+
+    /**
+     * Finaliza uma rota no backend.
+     */
+    suspend fun stopRouteInBackend(vehicleId: Long): Result<ApiClient.RouteDto> {
+        return backendRepository?.stopRoute(vehicleId)
+            ?: Result.failure(IllegalStateException("BackendRepository não configurado"))
+    }
+
+    /**
+     * Busca rotas do veículo no backend.
+     */
+    suspend fun getRoutesFromBackend(vehicleId: Long): Result<List<ApiClient.RouteDto>> {
+        return backendRepository?.getRoutes(vehicleId)
+            ?: Result.failure(IllegalStateException("BackendRepository não configurado"))
+    }
+
+    /**
+     * Busca uma rota com pontos no backend.
+     */
+    suspend fun getRouteFromBackend(routeId: Long): Result<Pair<ApiClient.RouteDto, List<ApiClient.TelemetryDto>>> {
+        return backendRepository?.getRoute(routeId)
+            ?: Result.failure(IllegalStateException("BackendRepository não configurado"))
     }
 
     // ── Dados brutos (para acesso direto quando necessário) ──────────────

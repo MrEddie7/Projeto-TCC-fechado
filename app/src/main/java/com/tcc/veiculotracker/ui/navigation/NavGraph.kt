@@ -15,6 +15,7 @@ import androidx.navigation.navArgument
 import com.tcc.veiculotracker.ui.components.BottomNavBar
 import com.tcc.veiculotracker.ui.screens.apilink.ApiLinkScreen
 import com.tcc.veiculotracker.ui.screens.dashboard.DashboardScreen
+import com.tcc.veiculotracker.ui.screens.device.DeviceLocationScreen
 import com.tcc.veiculotracker.ui.screens.history.RouteHistoryScreen
 import com.tcc.veiculotracker.ui.screens.login.LoginScreen
 import com.tcc.veiculotracker.ui.screens.register.RegisterScreen
@@ -98,6 +99,9 @@ fun NavGraph(startDestination: String = Screen.Login.route) {
                     onNavigateToApiLink = {
                         navController.navigate(Screen.ApiLink.route)
                     },
+                    onNavigateToDeviceLocation = {
+                        navController.navigate(Screen.DeviceLocation.route)
+                    },
                     onNavigateToVehicleDetail = { vehicleId ->
                         navController.navigate(Screen.VehicleDetail.createRoute(vehicleId))
                     }
@@ -141,6 +145,10 @@ fun NavGraph(startDestination: String = Screen.Login.route) {
                 ApiLinkScreen(
                     onNavigateBack = { navController.popBackStack() }
                 )
+            }
+
+            composable(Screen.DeviceLocation.route) {
+                DeviceLocationScreen()
             }
         }
     }
