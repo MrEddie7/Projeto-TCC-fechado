@@ -1,7 +1,7 @@
 {
   "name": "veiculotracker-backend",
   "version": "1.0.0",
-  "description": "API de ponte entre o hardware rastreador (GPS IoT) e o app VeiculoTracker (TCC)",
+  "description": "API de ponte entre o hardware rastreador (GPS IoT) e o app Securitas (TCC)",
   "main": "src/server.js",
   "type": "module",
   "engines": {
@@ -11,7 +11,13 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "simulator": "node src/hardware-simulator.js",
-    "seed": "node src/seed.js"
+    "seed": "node src/seed.js",
+    "test": "node tests/e2e.js",
+    "api": "./api.sh start",
+    "api:stop": "./api.sh stop",
+    "api:restart": "./api.sh restart",
+    "api:status": "./api.sh status",
+    "api:logs": "./api.sh logs"
   },
   "dependencies": {
     "express": "^4.21.2",

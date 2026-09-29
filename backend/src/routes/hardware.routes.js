@@ -100,6 +100,10 @@ router.get(
             plate: vehicle.plate,
             model: vehicle.model,
             isBlocked: vehicle.is_blocked === 1,
+            // O firmware usa isso para retomar a viagem de onde parou.
+            latitude: Number(vehicle.latitude),
+            longitude: Number(vehicle.longitude),
+            speed: Number(vehicle.speed),
           }
         : null,
       pendingCommands: getPendingCommandsForDevice(req.device).length,

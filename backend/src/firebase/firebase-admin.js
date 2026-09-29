@@ -22,6 +22,17 @@ export function getFirebase() {
   if (!initialized) {
     initialized = true;
     try {
+      if (config.firebaseServiceAccount && !fs.existsSync(config.firebaseServiceAccount)) {
+        // Caminho do service account configurado no .env, mas arquivo ausente.
+        // Falhar de forma clara (em vez de cair no fallback ADC, que trava em
+        // máquinas de desenvolvimento tentando obter OAuth token em loop).
+        throw new Error(
+          `Service account não encontrado: ${config.firebaseServiceAccount} ` +
+            '(baixe a chave privada no Firebase Console > Configurações > Contas ' +
+            'de serviço e salve neste caminho)'
+        );
+      }
+
       let credential;
       if (config.firebaseServiceAccount && fs.existsSync(config.firebaseServiceAccount)) {
         credential = JSON.parse(fs.readFileSync(config.firebaseServiceAccount, 'utf8'));

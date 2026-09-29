@@ -9,14 +9,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import com.tcc.veiculotracker.ui.navigation.NavGraph
-import com.tcc.veiculotracker.ui.theme.VeiculoTrackerTheme
+import com.tcc.veiculotracker.ui.theme.SecuritasTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            VeiculoTrackerTheme {
+            SecuritasTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background

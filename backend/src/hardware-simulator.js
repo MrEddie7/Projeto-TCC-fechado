@@ -31,7 +31,9 @@ if (!DEVICE_ID || !API_KEY) {
   process.exit(1);
 }
 
-// Estado inicial da "viagem simulada"
+// Estado inicial da "viagem simulada". O ponto de partida real vem do
+// veículo (definido no boot), senão todos os simuladores da frota
+// nasceriam empilhados no mesmo ponto e as rotas se sobreporiam no mapa.
 let lat = config.simulatorStartLat;
 let lng = config.simulatorStartLng;
 let heading = 45; // graus (nordeste)
@@ -116,6 +118,12 @@ async function boot() {
   console.log(
     `[sim] dispositivo registrado. Veículo: ${json.vehicle?.plate || 'sem vínculo'} | pendentes: ${json.pendingCommands}`
   );
+  // Retoma de onde o veículo parou, para não teleportar nem empilhar a frota.
+  if (json.vehicle && json.vehicle.latitude && json.vehicle.longitude) {
+    lat = Number(json.vehicle.latitude);
+    lng = Number(json.vehicle.longitude);
+    console.log(`[sim] retomando da posição atual: ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+  }
 }
 
 await boot();

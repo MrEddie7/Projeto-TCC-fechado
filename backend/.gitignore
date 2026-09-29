@@ -4,3 +4,4 @@ firebase-service-account.json
 data/*.db*
 *.log
 replay_pid*.log
+.run/

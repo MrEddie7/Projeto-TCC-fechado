@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Securitas · Diagnóstico da API</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36;
+    --fg: #e6e9ef; --muted: #8b93a7; --accent: #4c8dff;
+    --ok: #3ecf8e; --info: #4c8dff; --warn: #f0b429; --err: #f0616d;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column;
+  }
+
+  header {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+  header .base { color: var(--muted); font-size: 12px; font-family: ui-monospace, monospace; }
+  .spacer { flex: 1; }
+
+  form { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  input, select, button {
+    font: inherit; color: var(--fg); background: #10131a;
+    border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  button { cursor: pointer; background: #202634; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #06101f; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
+    padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line);
+    color: var(--muted); white-space: nowrap;
+  }
+  .chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+  .chip.live .dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(62,207,142,.15); }
+  .chip.err .dot { background: var(--err); box-shadow: 0 0 0 3px rgba(240,97,109,.15); }
+
+  main { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); min-height: 0; }
+  section { display: flex; flex-direction: column; background: var(--bg); min-height: 0; }
+  .head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .head h2 { font-size: 12px; margin: 0; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
+  .head .meta { font-size: 12px; color: var(--muted); font-family: ui-monospace, monospace; }
+
+  #map { flex: 1; min-height: 0; background: #0b0d12; }
+  .hud {
+    position: absolute; left: 12px; bottom: 12px; z-index: 500;
+    background: rgba(15,17,21,.92); border: 1px solid var(--line); border-radius: 9px;
+    padding: 8px 11px; font-size: 12px; line-height: 1.7; backdrop-filter: blur(4px);
+  }
+  .hud b { font-family: ui-monospace, monospace; font-weight: 600; }
+
+  #logs { flex: 1; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  #logs .row {
+    display: grid; grid-template-columns: 62px 52px 1fr 44px 58px;
+    gap: 8px; padding: 4px 14px; border-bottom: 1px solid rgba(38,43,54,.5); align-items: baseline;
+  }
+  #logs .row:hover { background: #141821; }
+  #logs .t { color: var(--muted); }
+  #logs .m { font-weight: 650; }
+  #logs .p { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #logs .s { text-align: right; font-weight: 650; }
+  #logs .d { text-align: right; color: var(--muted); }
+  .s2 { color: var(--ok); } .s3 { color: var(--info); } .s4 { color: var(--warn); } .s5 { color: var(--err); }
+  .mGET { color: var(--info); } .mPOST { color: var(--ok); } .mPUT { color: var(--warn); } .mDELETE { color: var(--err); }
+  #logs .empty, .msg { padding: 18px 14px; color: var(--muted); }
+
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; grid-template-rows: 45vh 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Securitas · Diagnóstico da API</h1>
+  <span class="base" id="base"></span>
+  <div class="spacer"></div>
+
+  <form id="loginForm">
+    <input id="email" type="email" placeholder="e-mail" value="aluno@tcc.com" autocomplete="username">
+    <input id="password" type="password" placeholder="senha" value="veiculotracker123" autocomplete="current-password">
+    <button class="primary" type="submit" id="btnLogin">Entrar</button>
+    <button type="button" id="btnLogout" hidden>Sair</button>
+  </form>
+
+  <span class="chip" id="chipAuth"><span class="dot"></span><span>desconectado</span></span>
+</header>
+
+<main>
+  <section>
+    <div class="head">
+      <h2>Mapa</h2>
+      <div class="spacer"></div>
+      <select id="vehicle" hidden></select>
+    </div>
+    <div id="map">
+      <div class="hud" id="hud" hidden>
+        <div>placa <b id="hudPlate">—</b> <span id="hudBlocked"></span></div>
+        <div>velocidade <b id="hudSpeed">—</b> km/h</div>
+        <div>lat <b id="hudLat">—</b> · lon <b id="hudLng">—</b></div>
+        <div>bateria <b id="hudBat">—</b>%</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <h2>Logs do backend</h2>
+      <div class="spacer"></div>
+      <label class="meta"><input type="checkbox" id="follow" checked> seguir</label>
+      <label class="meta"><input type="checkbox" id="onlyErr"> só erros</label>
+      <span class="chip" id="chipStream"><span class="dot"></span><span>parado</span></span>
+    </div>
+    <div id="logs"><div class="empty">Entre para ver as requisições.</div></div>
+  </section>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+'use strict';
+
+const BASE = location.origin;
+const $ = (id) => document.getElementById(id);
+$('base').textContent = BASE;
+
+const state = { token: null, vehicleId: null, vehicle: null, lastSeq: 0, logStream: null, telStream: null };
+const MAX_ROWS = 400;
+
+// ── API ──────────────────────────────────────────────────────────────────
+
+async function api(path, options = {}) {
+  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  if (state.token) headers.Authorization = `Bearer ${state.token}`;
+  const res = await fetch(BASE + path, { ...options, headers });
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = { raw: text }; }
+  return { status: res.status, ok: res.ok, data };
+}
+
+// Consome SSE via fetch (EventSource não envia header Authorization).
+async function sse(path, onEvent, signal) {
+  const res = await fetch(BASE + path, {
+    headers: { Authorization: `Bearer ${state.token}`, Accept: 'text/event-stream' },
+    signal,
+  });
+  if (!res.ok) throw new Error(`stream ${res.status}`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let cut;
+    while ((cut = buf.indexOf('\n\n')) >= 0) {
+      const chunk = buf.slice(0, cut);
+      buf = buf.slice(cut + 2);
+      let event = 'message';
+      const data = [];
+      for (const line of chunk.split('\n')) {
+        if (line.startsWith(':')) continue;
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) data.push(line.slice(5).trim());
+      }
+      if (data.length) {
+        try { onEvent(event, JSON.parse(data.join('\n'))); } catch { /* payload não-JSON */ }
+      }
+    }
+  }
+}
+
+// ── Mapa ─────────────────────────────────────────────────────────────────
+
+const map = L.map('map', { zoomControl: true }).setView([-23.5505, -46.6333], 13);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '&copy; OpenStreetMap',
+}).addTo(map);
+
+const marker = L.circleMarker([-23.5505, -46.6333], {
+  radius: 9, color: '#fff', weight:2, fillColor:'#4c8dff', fillOpacity: .95,
+}).addTo(map);
+let centered = false;
+
+function setHud(plate, speed, lat, lng, battery, blocked) {
+  state.vehicle = { plate, speed, latitude: lat, longitude: lng, battery, isBlocked: !!blocked };
+  $('hud').hidden = false;
+  $('hudPlate').textContent = plate || '—';
+  $('hudSpeed').textContent = speed ?? '—';
+  $('hudLat').textContent = lat ?? '—';
+  $('hudLng').textContent = lng ?? '—';
+  $('hudBat').textContent = battery ?? '—';
+  $('hudBlocked').innerHTML = blocked ? '<span style="color:var(--err)">· BLOQUEADO</span>' : '';
+}
+
+function moveMarker(lat, lng, animate) {
+  if (lat == null || lng == null) return;
+  marker.setLatLng([lat, lng]);
+  if (animate && !centered) { map.setView([lat, lng], 16); centered = true; }
+  else if (animate) map.panTo([lat, lng]);
+}
+
+// ── Logs ─────────────────────────────────────────────────────────────────
+
+const rows = [];
+
+function statusClass(s) { return 's' + String(s).charAt(0); }
+
+function addRow(entry) {
+  rows.push(entry);
+  if (rows.length > MAX_ROWS) rows.shift();
+  renderLogs();
+}
+
+function renderLogs() {
+  const box = $('logs');
+  const onlyErr = $('onlyErr').checked;
+  const visible = rows.filter((r) => !onlyErr || r.status >= 400 || r.level === 'error');
+
+  if (!visible.length) {
+    box.innerHTML = `<div class="empty">${rows.length ? 'Nenhuma entrada com esse filtro.' : 'Aguardando requisições…'}</div>`;
+    return;
+  }
+
+  const t = (ms) => new Date(ms).toLocaleTimeString('pt-BR', { hour12: false });
+  box.innerHTML = visible.map((r) => `
+    <div class="row">
+      <span class="t">${t(r.at)}</span>
+      <span class="m m${r.method}">${r.method}</span>
+      <span class="p" title="${r.path}">${r.path}</span>
+      <span class="s ${statusClass(r.status)}">${r.status}</span>
+      <span class="d">${r.durationMs ?? ''}${r.durationMs != null ? 'ms' : ''}</span>
+    </div>`).join('');
+
+  if ($('follow').checked) box.scrollTop = box.scrollHeight;
+}
+
+$('follow').addEventListener('change', renderLogs);
+$('onlyErr').addEventListener('change', renderLogs);
+
+// ── Streams ──────────────────────────────────────────────────────────────
+
+function setChip(el, cls, text) {
+  el.className = 'chip' + (cls ? ' ' + cls : '');
+  el.lastElementChild.textContent = text;
+}
+
+async function startLogStream() {
+  stopLogStream();
+  const ctrl = new AbortController();
+  state.logStream = ctrl;
+
+  // Histórico primeiro, depois o stream assume sem repetir nada.
+  const hist = await api('/v1/admin/logs?limit=200');
+  if (hist.ok && hist.data.entries) {
+    rows.length = 0;
+    for (const e of hist.data.entries) rows.push(e);
+    state.lastSeq = hist.data.lastSeq || 0;
+    renderLogs();
+  }
+
+  (async () => {
+    while (!ctrl.signal.aborted) {
+      try {
+        await sse('/v1/admin/logs/stream', (_e, entry) => {
+          if (entry.seq <= state.lastSeq) return;
+          state.lastSeq = entry.seq;
+          addRow(entry);
+        }, ctrl.signal);
+      } catch (e) {
+        if (e.name === 'AbortError' || ctrl.signal.aborted) return;
+      }
+      if (ctrl.signal.aborted) return;
+
+      setChip($('chipStream'), 'err', 'reconectando');
+      // Recupera o que chegou enquanto a conexão estava fora.
+      try {
+        const gap = await api(`/v1/admin/logs?since=${state.lastSeq}&limit=200`);
+        if (gap.ok && gap.data.entries) {
+          for (const e of gap.data.entries) {
+            if (e.seq > state.lastSeq) { state.lastSeq = e.seq; addRow(e); }
+          }
+        }
+      } catch { /* tenta de novo no próximo ciclo */ }
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  })();
+
+  setChip($('chipStream'), 'live', 'ao vivo');
+}
+
+function stopLogStream() {
+  if (state.logStream) { state.logStream.abort(); state.logStream = null; }
+  setChip($('chipStream'), '', 'parado');
+}
+
+async function startTelemetryStream(vehicleId) {
+  if (state.telStream) state.telStream.abort();
+  const ctrl = new AbortController();
+  state.telStream = ctrl;
+
+  const latest = await api(`/v1/vehicles/${vehicleId}/telemetry/latest`);
+  if (latest.ok && latest.data.latest) {
+    const p = latest.data.latest;
+    moveMarker(p.latitude, p.longitude, false);
+    setHud(latest.data.vehicle.plate, p.speed, p.latitude, p.longitude, p.battery,
+           latest.data.vehicle.isBlocked);
+  }
+
+  (async () => {
+    while (!ctrl.signal.aborted) {
+      try {
+        await sse(`/v1/vehicles/${vehicleId}/telemetry/stream`, (event, payload) => {
+          if (event === 'presence' && payload.vehicle) {
+            const v = payload.vehicle;
+            setHud(v.plate, v.speed, v.latitude, v.longitude, state.vehicle?.battery, v.isBlocked);
+            moveMarker(v.latitude, v.longitude, false);
+          } else if (event === 'telemetry') {
+            moveMarker(payload.latitude, payload.longitude, true);
+            setHud(state.vehicle?.plate, payload.speed, payload.latitude, payload.longitude,
+                   payload.battery, state.vehicle?.isBlocked);
+          }
+        }, ctrl.signal);
+      } catch (e) {
+        if (e.name === 'AbortError' || ctrl.signal.aborted) return;
+      }
+      if (ctrl.signal.aborted) return;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  })();
+}
+
+// ── Login / veículos ─────────────────────────────────────────────────────
+
+async function loadVehicles() {
+  const res = await api('/v1/vehicles');
+  const list = res.ok ? (res.data.vehicles || []) : [];
+  const sel = $('vehicle');
+  sel.innerHTML = '';
+  if (!list.length) {
+    setHud(null, null, null, null, null, false);
+    $('hudPlate').textContent = 'sem veículos';
+    return;
+  }
+  sel.hidden = false;
+  for (const v of list) {
+    const opt = document.createElement('option');
+    opt.value = v.id;
+    opt.textContent = `${v.plate} — ${v.brand} ${v.model}`;
+    sel.appendChild(opt);
+  }
+  sel.onchange = () => selectVehicle(Number(sel.value));
+  await selectVehicle(list[0].id);
+}
+
+async function selectVehicle(id) {
+  state.vehicleId = id;
+  centered = false;
+  const res = await api(`/v1/vehicles/${id}`);
+  if (res.ok) {
+    const v = res.data.vehicle;
+    setHud(v.plate, v.speed, v.latitude, v.longitude, null, v.isBlocked);
+    if (v.latitude && v.longitude) { moveMarker(v.latitude, v.longitude, true); }
+  }
+  await startTelemetryStream(id);
+}
+
+$('loginForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const btn = $('btnLogin');
+  btn.disabled = true;
+  const res = await api('/v1/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email: $('email').value.trim(), password: $('password').value }),
+  });
+  btn.disabled = false;
+  if (!res.ok) {
+    setChip($('chipAuth'), 'err', res.data.error || 'falha no login');
+    return;
+  }
+  state.token = res.data.token;
+  setChip($('chipAuth'), 'live', 'autenticado');
+  $('btnLogout').hidden = false;
+  await startLogStream();
+  await loadVehicles();
+});
+
+$('btnLogout').addEventListener('click', async () => {
+  if (state.token) await api('/v1/auth/logout', { method: 'POST' });
+  state.token = null;
+  stopLogStream();
+  if (state.telStream) state.telStream.abort();
+  $('btnLogout').hidden = true;
+  setChip($('chipAuth'), '', 'desconectado');
+  rows.length = 0;
+  renderLogs();
+});
+
+setChip($('chipStream'), '', 'parado');
+setChip($('chipAuth'), '', 'desconectado');
+</script>
+</body>
+</html>

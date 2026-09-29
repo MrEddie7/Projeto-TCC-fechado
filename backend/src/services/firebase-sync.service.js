@@ -18,9 +18,10 @@ function setLastSync(key, value) {
 
 // ── Firestore: users / vehicles / routes ────────────────────────────────
 
-async function syncUsers(firestore) {
-  const since = getLastSync('users');
-  const rows = db.prepare('SELECT * FROM users WHERE updated_at > ?').all(since);
+async function syncUsers(firestore, since, cutoff) {
+  const rows = db
+    .prepare('SELECT * FROM users WHERE updated_at > ? AND updated_at <= ?')
+    .all(since, cutoff);
   if (rows.length === 0) return 0;
   for (const u of rows) {
     await firestore
@@ -36,9 +37,10 @@ async function syncUsers(firestore) {
   return rows.length;
 }
 
-async function syncVehicles(firestore) {
-  const since = getLastSync('vehicles');
-  const rows = db.prepare('SELECT * FROM vehicles WHERE updated_at > ?').all(since);
+async function syncVehicles(firestore, since, cutoff) {
+  const rows = db
+    .prepare('SELECT * FROM vehicles WHERE updated_at > ? AND updated_at <= ?')
+    .all(since, cutoff);
   for (const v of rows) {
     await firestore
       .collection('vehicles')
@@ -62,9 +64,10 @@ async function syncVehicles(firestore) {
   return rows.length;
 }
 
-async function syncRoutes(firestore) {
-  const since = getLastSync('routes');
-  const rows = db.prepare('SELECT * FROM routes WHERE updated_at > ?').all(since);
+async function syncRoutes(firestore, since, cutoff) {
+  const rows = db
+    .prepare('SELECT * FROM routes WHERE updated_at > ? AND updated_at <= ?')
+    .all(since, cutoff);
   for (const r of rows) {
     await firestore
       .collection('routes')
@@ -135,7 +138,17 @@ async function syncCommands(rtdb) {
 
 // ── Tick de sincronização ───────────────────────────────────────────────
 
-export async function syncOnce() {
+// Zera as marcas d'água para forçar o reenvio de tudo.
+export function resetSyncWatermarks() {
+  for (const key of STATE_KEYS) {
+    if (key === 'last_run') continue;
+    db.prepare(
+      "INSERT INTO sync_state (key, value) VALUES (?, -1) ON CONFLICT(key) DO UPDATE SET value = -1"
+    ).run(key);
+  }
+}
+
+export async function syncOnce({ full = false } = {}) {
   const fb = getFirebase();
   if (!fb) {
     return { enabled: false, reason: 'FIREBASE_SYNC_ENABLED=false ou sem credenciais' };
@@ -143,45 +156,56 @@ export async function syncOnce() {
 
   const { firestore, rtdb } = fb;
   const started = Date.now();
-  const summary = { users: 0, vehicles: 0, routes: 0, telemetry: 0, commands: 0 };
 
-  try {
-    summary.users = await syncUsers(firestore);
-  } catch (e) {
-    console.warn('[sync] users ->', e.message);
+  // Corte fechado: tudo que for gravado depois deste instante entra na
+  // próxima rodada. Usar Date.now() no fim da rodada fazia o intervalo ficar
+  // aberto e engolia as linhas criadas durante a própria sincronização.
+  const cutoff = Date.now();
+  if (full) resetSyncWatermarks();
+
+  const summary = { users: 0, vehicles: 0, routes: 0, telemetry: 0, commands: 0 };
+  const failed = [];
+
+  // A marca só avança para a coleção que foi escrita com sucesso: se o
+  // Firestore falhar no meio, avançar perderia os registros para sempre.
+  for (const [key, fn, target] of [
+    ['users', syncUsers, firestore],
+    ['vehicles', syncVehicles, firestore],
+    ['routes', syncRoutes, firestore],
+  ]) {
+    try {
+      summary[key] = await fn(target, getLastSync(key), cutoff);
+      setLastSync(key, cutoff);
+    } catch (e) {
+      failed.push(key);
+      console.warn(`[sync] ${key} ->`, e.message);
+    }
   }
-  try {
-    summary.vehicles = await syncVehicles(firestore);
-  } catch (e) {
-    console.warn('[sync] vehicles ->', e.message);
-  }
-  try {
-    summary.routes = await syncRoutes(firestore);
-  } catch (e) {
-    console.warn('[sync] routes ->', e.message);
-  }
+
   if (rtdb) {
+    // RTDB sempre publica o estado atual, não um delta, então não usa marca.
     try {
       summary.telemetry = await syncTelemetry(rtdb);
     } catch (e) {
+      failed.push('telemetry');
       console.warn('[sync] telemetry ->', e.message);
     }
     try {
       summary.commands = await syncCommands(rtdb);
     } catch (e) {
+      failed.push('commands');
       console.warn('[sync] commands ->', e.message);
     }
   }
 
-  const now = Date.now();
-  for (const key of ['users', 'vehicles', 'routes']) setLastSync(key, now);
-  setLastSync('last_run', now);
+  setLastSync('last_run', Date.now());
 
   console.log(
-    `[sync] rodada em ${now - started}ms | users=${summary.users} vehicles=${summary.vehicles} ` +
-      `routes=${summary.routes} telemetry=${summary.telemetry} commands=${summary.commands}`
+    `[sync] rodada em ${Date.now() - started}ms | users=${summary.users} vehicles=${summary.vehicles} ` +
+      `routes=${summary.routes} telemetry=${summary.telemetry} commands=${summary.commands}` +
+      (failed.length ? ` | FALHOU: ${failed.join(', ')}` : '')
   );
-  return { enabled: true, durationMs: now - started, summary };
+  return { enabled: true, durationMs: Date.now() - started, summary, failed };
 }
 
 export function startFirebaseSync() {
