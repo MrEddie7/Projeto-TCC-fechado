@@ -1952,7 +1952,7 @@
 <item name="android:windowIsFloating">true</item>
 <item name="android:backgroundDimEnabled">false</item>
 </style>
-    <style name="Theme.VeiculoTracker" parent="android:Theme.Material.Light.NoActionBar">
+    <style name="Theme.Securitas" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:statusBarColor">@color/primary_dark</item>
         <item name="android:navigationBarColor">@color/white</item>
     </style>

@@ -16,7 +16,7 @@
     <string name="google_storage_bucket" translatable="false">securitas-ce0bd.firebasestorage.app</string>
     <string name="google_web_client_id" translatable="false">35252490635-e5kpel0npkndurl81n431c7gdcjhbl67.apps.googleusercontent.com</string>
     <string name="project_id" translatable="false">securitas-ce0bd</string>
-    <style name="Theme.VeiculoTracker" parent="android:Theme.Material.Light.NoActionBar">
+    <style name="Theme.Securitas" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:statusBarColor">@color/primary_dark</item>
         <item name="android:navigationBarColor">@color/white</item>
     </style>

@@ -1502,7 +1502,7 @@ style Theme_AppCompat_Light_NoActionBar
 style Theme_AppCompat_NoActionBar
 style Theme_Hidden
 style Theme_PlayCore_Transparent
-style Theme_VeiculoTracker
+style Theme_Securitas
 style ThemeOverlay_AppCompat
 style ThemeOverlay_AppCompat_ActionBar
 style ThemeOverlay_AppCompat_Dark

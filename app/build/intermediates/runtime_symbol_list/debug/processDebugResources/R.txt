@@ -1501,7 +1501,7 @@ int style Theme_AppCompat_Light_NoActionBar 0x7f10010b
 int style Theme_AppCompat_NoActionBar 0x7f10010c
 int style Theme_Hidden 0x7f10010d
 int style Theme_PlayCore_Transparent 0x7f10010e
-int style Theme_VeiculoTracker 0x7f10010f
+int style Theme_Securitas 0x7f10010f
 int style ThemeOverlay_AppCompat 0x7f100110
 int style ThemeOverlay_AppCompat_ActionBar 0x7f100111
 int style ThemeOverlay_AppCompat_Dark 0x7f100112
