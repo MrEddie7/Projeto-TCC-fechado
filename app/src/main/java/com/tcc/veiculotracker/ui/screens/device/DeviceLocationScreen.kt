@@ -152,6 +152,32 @@ fun DeviceLocationScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     }
+
+                    // Envio automático: mantém a API atualizada com a posição do celular.
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Enviar automaticamente à API",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "Atualiza a posição do celular a cada 15s para vê-lo junto do veículo",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = state.isAutoSend,
+                            onCheckedChange = { viewModel.setAutoSend(it) },
+                            enabled = state.isTracking
+                        )
+                    }
                 }
             }
 

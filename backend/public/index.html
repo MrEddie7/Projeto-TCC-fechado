@@ -3,18 +3,31 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Securitas · Diagnóstico da API</title>
+<title>Securitas · Painel do Sistema</title>
+<script>
+  // Aplica o tema salvo antes do primeiro render para evitar "flash".
+  try { document.documentElement.dataset.theme = localStorage.getItem('securitas-theme') || 'dark'; } catch {}
+</script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   :root {
-    --bg: #0f1115; --panel: #171a21; --line: #262b36;
+    --bg: #0f1115; --panel: #171a21; --panel2: #12151c; --line: #262b36;
     --fg: #e6e9ef; --muted: #8b93a7; --accent: #4c8dff;
     --ok: #3ecf8e; --info: #4c8dff; --warn: #f0b429; --err: #f0616d;
+    --input: #10131a; --btn: #202634; --hover: #141821;
+    --mapbg: #0b0d12; --hud-bg: rgba(15,17,21,.92);
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f6fa; --panel: #ffffff; --panel2: #f0f2f7; --line: #dce1ea;
+    --fg: #161a22; --muted: #5c6577; --accent: #2f6fe0;
+    --ok: #1f9d63; --info: #2f6fe0; --warn: #b7791f; --err: #d64550;
+    --input: #ffffff; --btn: #e9edf4; --hover: #eef1f7;
+    --mapbg: #dfe3ea; --hud-bg: rgba(255,255,255,.94);
   }
   * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; }
+  html, body { margin: 0; }
   body {
-    background: var(--bg); color: var(--fg);
+    background: var(--bg); color: var(--fg); min-height: 100vh;
     font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     display: flex; flex-direction: column;
   }
@@ -22,18 +35,20 @@
   header {
     display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
     padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; z-index: 900;
   }
   header h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: .2px; }
   header .base { color: var(--muted); font-size: 12px; font-family: ui-monospace, monospace; }
+  header .iconbtn { padding: 5px 9px; line-height: 1; font-size: 15px; }
   .spacer { flex: 1; }
 
   form { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   input, select, button {
-    font: inherit; color: var(--fg); background: #10131a;
+    font: inherit; color: var(--fg); background: var(--input);
     border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px;
   }
   input:focus, select:focus { outline: none; border-color: var(--accent); }
-  button { cursor: pointer; background: #202634; }
+  button { cursor: pointer; background: var(--btn); }
   button:hover { border-color: var(--accent); }
   button.primary { background: var(--accent); border-color: var(--accent); color: #06101f; font-weight: 600; }
   button:disabled { opacity: .5; cursor: not-allowed; }
@@ -45,31 +60,96 @@
   }
   .chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
   .chip.live .dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(62,207,142,.15); }
+  .chip.warn .dot { background: var(--warn); box-shadow: 0 0 0 3px rgba(240,180,41,.15); }
   .chip.err .dot { background: var(--err); box-shadow: 0 0 0 3px rgba(240,97,109,.15); }
 
-  main { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); min-height: 0; }
-  section { display: flex; flex-direction: column; background: var(--bg); min-height: 0; }
-  .head {
-    display: flex; align-items: center; gap: 10px;
-    padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--line);
-  }
-  .head h2 { font-size: 12px; margin: 0; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
-  .head .meta { font-size: 12px; color: var(--muted); font-family: ui-monospace, monospace; }
+  main { flex: 1; width: 100%; max-width: 1600px; margin: 0 auto; padding: 14px; }
 
-  #map { flex: 1; min-height: 0; background: #0b0d12; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 11px 13px;
+  }
+  .card .k { font-size: 11px; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); }
+  .card .v { font-size: 22px; font-weight: 700; font-family: ui-monospace, monospace; margin-top: 2px; }
+  .card .sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .card.accent { border-color: rgba(76,141,255,.4); background: linear-gradient(180deg, rgba(76,141,255,.10), transparent); }
+  .card.warnv .v { color: var(--warn); }
+
+  .layout { display: grid; grid-template-columns: minmax(320px, 430px) 1fr; gap: 14px; align-items: start; }
+  .col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .panel > .head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 13px; background: var(--panel2); border-bottom: 1px solid var(--line);
+  }
+  .panel > .head h2 { font-size: 12px; margin: 0; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
+  .panel > .head .meta { font-size: 12px; color: var(--muted); font-family: ui-monospace, monospace; }
+  .panel .body { padding: 12px 13px; }
+  .panel .body.tight { padding: 8px; }
+
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; font-family: ui-monospace, monospace; word-break: break-all; text-align: right; }
+
+  .screens { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .screen {
+    border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; background: var(--panel2);
+  }
+  .screen .top { display: flex; align-items: center; gap: 7px; }
+  .screen .name { font-weight: 600; font-size: 13px; }
+  .screen .ep { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); margin-top: 3px; word-break: break-all; }
+  .screen .detail { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 0 3px rgba(62,207,142,.15); }
+  .dot.warn { background: var(--warn); box-shadow: 0 0 0 3px rgba(240,180,41,.15); }
+  .dot.err { background: var(--err); box-shadow: 0 0 0 3px rgba(240,97,109,.15); }
+
+  .user { border-bottom: 1px solid var(--line); padding: 10px 13px; }
+  .user:last-child { border-bottom: 0; }
+  .user .who { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .user .who b { font-size: 13.5px; }
+  .user .who .email { color: var(--muted); font-size: 12px; font-family: ui-monospace, monospace; }
+  .user .who .id { color: var(--muted); font-size: 11px; }
+  .vehicle {
+    display: grid; grid-template-columns: 1fr auto; gap: 2px 10px;
+    margin-top: 7px; padding: 7px 9px; border: 1px solid var(--line);
+    border-radius: 7px; background: var(--panel2);
+  }
+  .vehicle .plate { font-family: ui-monospace, monospace; font-weight: 700; letter-spacing: .5px; }
+  .vehicle .model { color: var(--muted); font-size: 12px; }
+  .vehicle .right { text-align: right; font-size: 11.5px; color: var(--muted); }
+  .badge { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); margin-left: 6px; }
+  .badge.on { color: var(--ok); border-color: rgba(62,207,142,.4); }
+  .badge.off { color: var(--muted); }
+  .badge.blocked { color: var(--err); border-color: rgba(240,97,109,.4); }
+  .badge.sim { color: var(--warn); border-color: rgba(240,180,41,.45); }
+  .badge.real { color: var(--info); border-color: rgba(76,141,255,.45); }
+
+  #realTest { padding: 0; }
+  .real-section { border-left: 3px solid var(--info); }
+  .rt-row {
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 9px 13px; border-bottom: 1px solid rgba(38,43,54,.5); font-size: 12.5px;
+  }
+  .rt-row b { color: var(--fg); font-weight: 650; }
+  .rt-sub { color: var(--muted); font-size: 11.5px; }
+
+  #map { height: clamp(280px, 45vh, 460px); width: 100%; background: var(--mapbg); }
   .hud {
     position: absolute; left: 12px; bottom: 12px; z-index: 500;
-    background: rgba(15,17,21,.92); border: 1px solid var(--line); border-radius: 9px;
+    background: var(--hud-bg); border: 1px solid var(--line); border-radius: 9px;
     padding: 8px 11px; font-size: 12px; line-height: 1.7; backdrop-filter: blur(4px);
   }
   .hud b { font-family: ui-monospace, monospace; font-weight: 600; }
 
-  #logs { flex: 1; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  #logs { max-height: 340px; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   #logs .row {
     display: grid; grid-template-columns: 62px 52px 1fr 44px 58px;
-    gap: 8px; padding: 4px 14px; border-bottom: 1px solid rgba(38,43,54,.5); align-items: baseline;
+    gap: 8px; padding: 4px 13px; border-bottom: 1px solid rgba(38,43,54,.5); align-items: baseline;
   }
-  #logs .row:hover { background: #141821; }
+  #logs .row:hover { background: var(--hover); }
   #logs .t { color: var(--muted); }
   #logs .m { font-weight: 650; }
   #logs .p { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -77,17 +157,27 @@
   #logs .d { text-align: right; color: var(--muted); }
   .s2 { color: var(--ok); } .s3 { color: var(--info); } .s4 { color: var(--warn); } .s5 { color: var(--err); }
   .mGET { color: var(--info); } .mPOST { color: var(--ok); } .mPUT { color: var(--warn); } .mDELETE { color: var(--err); }
-  #logs .empty, .msg { padding: 18px 14px; color: var(--muted); }
+  #logs .empty, .msg { padding: 18px 13px; color: var(--muted); }
+  .empty-state { padding: 18px 13px; color: var(--muted); }
 
-  @media (max-width: 900px) {
-    main { grid-template-columns: 1fr; grid-template-rows: 45vh 1fr; }
+  @media (max-width: 1050px) {
+    .layout { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 640px) {
+    .screens { grid-template-columns: 1fr; }
+    header { gap: 8px; padding: 9px 12px; }
+    header h1 { font-size: 13px; }
+    header .base { display: none; }
+    #loginForm { width: 100%; }
+    #loginForm input { flex: 1 1 120px; min-width: 0; }
+    main { padding: 10px; }
   }
 </style>
 </head>
 <body>
 
 <header>
-  <h1>Securitas · Diagnóstico da API</h1>
+  <h1>Securitas · Painel do Sistema</h1>
   <span class="base" id="base"></span>
   <div class="spacer"></div>
 
@@ -98,36 +188,108 @@
     <button type="button" id="btnLogout" hidden>Sair</button>
   </form>
 
+  <button type="button" id="btnTheme" class="iconbtn" title="Alternar tema" aria-label="Alternar tema claro/escuro">☀</button>
   <span class="chip" id="chipAuth"><span class="dot"></span><span>desconectado</span></span>
 </header>
 
 <main>
-  <section>
-    <div class="head">
-      <h2>Mapa</h2>
-      <div class="spacer"></div>
-      <select id="vehicle" hidden></select>
+  <div class="stats" id="stats">
+    <div class="card accent">
+      <div class="k">API</div>
+      <div class="v" id="stApi">—</div>
+      <div class="sub" id="stApiSub">aguardando login</div>
     </div>
-    <div id="map">
-      <div class="hud" id="hud" hidden>
-        <div>placa <b id="hudPlate">—</b> <span id="hudBlocked"></span></div>
-        <div>velocidade <b id="hudSpeed">—</b> km/h</div>
-        <div>lat <b id="hudLat">—</b> · lon <b id="hudLng">—</b></div>
-        <div>bateria <b id="hudBat">—</b>%</div>
-      </div>
-    </div>
-  </section>
+    <div class="card"><div class="k">Usuários</div><div class="v" id="stUsers">—</div><div class="sub">contas no sistema</div></div>
+    <div class="card"><div class="k">Veículos</div><div class="v" id="stVehicles">—</div><div class="sub" id="stVehiclesSub">— online · — bloqueados</div></div>
+    <div class="card"><div class="k">Dispositivos</div><div class="v" id="stDevices">—</div><div class="sub">hardware vinculado</div></div>
+    <div class="card"><div class="k">Telemetria</div><div class="v" id="stTelemetry">—</div><div class="sub">pontos GPS</div></div>
+    <div class="card"><div class="k">Rotas</div><div class="v" id="stRoutes">—</div><div class="sub" id="stRoutesSub">— em andamento</div></div>
+    <div class="card" id="cardCommands"><div class="k">Comandos</div><div class="v" id="stCommands">—</div><div class="sub" id="stCommandsSub">— pendentes</div></div>
+    <div class="card"><div class="k">Celular</div><div class="v" id="stMobile">—</div><div class="sub" id="stMobileSub">posições do app · teste real</div></div>
+    <div class="card accent" id="cardRealTest"><div class="k">Teste real</div><div class="v" id="stRealTest">—</div><div class="sub" id="stRealTestSub">fora do simulador</div></div>
+  </div>
 
-  <section>
-    <div class="head">
-      <h2>Logs do backend</h2>
-      <div class="spacer"></div>
-      <label class="meta"><input type="checkbox" id="follow" checked> seguir</label>
-      <label class="meta"><input type="checkbox" id="onlyErr"> só erros</label>
-      <span class="chip" id="chipStream"><span class="dot"></span><span>parado</span></span>
+  <div class="layout">
+    <!-- Coluna esquerda: teste real, usuários/veículos e status das telas -->
+    <div class="col">
+      <section class="panel real-section">
+        <div class="head">
+          <h2>Teste real · fora da simulação</h2>
+          <div class="spacer"></div>
+          <span class="chip" id="chipReal"><span class="dot"></span><span>—</span></span>
+        </div>
+        <div class="body">
+          <div id="realTest"><div class="empty-state">—</div></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="head">
+          <h2>Usuários e veículos</h2>
+          <div class="spacer"></div>
+          <span class="meta" id="usersMeta">—</span>
+        </div>
+        <div id="users"><div class="empty-state">Entre para listar os usuários do sistema.</div></div>
+      </section>
+
+      <section class="panel">
+        <div class="head">
+          <h2>Status das telas do sistema</h2>
+          <div class="spacer"></div>
+          <span class="meta" id="screensMeta">—</span>
+        </div>
+        <div class="body">
+          <div class="screens" id="screens"><div class="empty-state">—</div></div>
+        </div>
+      </section>
     </div>
-    <div id="logs"><div class="empty">Entre para ver as requisições.</div></div>
-  </section>
+
+    <!-- Coluna direita: API em execução, mapa e logs -->
+    <div class="col">
+      <section class="panel">
+        <div class="head">
+          <h2>API em execução</h2>
+          <div class="spacer"></div>
+          <span class="chip" id="chipApi"><span class="dot"></span><span>—</span></span>
+        </div>
+        <div class="body">
+          <dl class="kv" id="serviceKV"><div class="empty-state">—</div></dl>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="head">
+          <h2>Mapa</h2>
+          <div class="spacer"></div>
+          <select id="vehicle" hidden></select>
+        </div>
+        <div style="position:relative">
+          <div id="map"></div>
+          <div class="hud" id="hud" hidden>
+            <div>placa <b id="hudPlate">—</b> <span id="hudBlocked"></span></div>
+            <div>velocidade <b id="hudSpeed">—</b> km/h</div>
+            <div>lat <b id="hudLat">—</b> · lon <b id="hudLng">—</b></div>
+            <div>bateria <b id="hudBat">—</b>%</div>
+          </div>
+        </div>
+        <div style="display:flex; gap:16px; padding:8px 12px; font-size:11.5px; color:var(--muted); align-items:center">
+          <span><b style="color:var(--info)">●</b> Veículo (telemetria)</span>
+          <span id="mapPhoneLegend" hidden><b style="color:#2979ff">●</b> Celular (teste real) · junto do veículo</span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="head">
+          <h2>Logs do backend</h2>
+          <div class="spacer"></div>
+          <label class="meta"><input type="checkbox" id="follow" checked> seguir</label>
+          <label class="meta"><input type="checkbox" id="onlyErr"> só erros</label>
+          <span class="chip" id="chipStream"><span class="dot"></span><span>parado</span></span>
+        </div>
+        <div id="logs"><div class="empty">Entre para ver as requisições.</div></div>
+      </section>
+    </div>
+  </div>
 </main>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -138,7 +300,10 @@ const BASE = location.origin;
 const $ = (id) => document.getElementById(id);
 $('base').textContent = BASE;
 
-const state = { token: null, vehicleId: null, vehicle: null, lastSeq: 0, logStream: null, telStream: null };
+const state = {
+  token: null, vehicleId: null, vehicle: null,
+  lastSeq: 0, logStream: null, telStream: null, refreshTimer: null, vehiclesById: {},
+};
 const MAX_ROWS = 400;
 
 // ── API ──────────────────────────────────────────────────────────────────
@@ -154,12 +319,13 @@ async function api(path, options = {}) {
 }
 
 // Consome SSE via fetch (EventSource não envia header Authorization).
-async function sse(path, onEvent, signal) {
+async function sse(path, onEvent, signal, onOpen) {
   const res = await fetch(BASE + path, {
     headers: { Authorization: `Bearer ${state.token}`, Accept: 'text/event-stream' },
     signal,
   });
   if (!res.ok) throw new Error(`stream ${res.status}`);
+  if (onOpen) onOpen();
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = '';
@@ -185,6 +351,206 @@ async function sse(path, onEvent, signal) {
   }
 }
 
+// ── Helpers de formatação ────────────────────────────────────────────────
+
+function fmtUptime(sec) {
+  if (sec == null) return '—';
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  const parts = [];
+  if (d) parts.push(d + 'd');
+  if (h || d) parts.push(h + 'h');
+  parts.push(m + 'm');
+  if (!d && !h) parts.push(s + 's');
+  return parts.join(' ');
+}
+
+function fmtAgo(ts) {
+  if (!ts) return 'nunca';
+  const diff = Date.now() - ts;
+  if (diff < 0) return 'agora';
+  const s = Math.floor(diff / 1000);
+  if (s < 60) return s + 's atrás';
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + 'min atrás';
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + 'h atrás';
+  return Math.floor(h / 24) + 'd atrás';
+}
+
+function fmtTime(ts) {
+  return ts ? new Date(ts).toLocaleString('pt-BR', { hour12: false }) : '—';
+}
+
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+function setChip(el, cls, text) {
+  el.className = 'chip' + (cls ? ' ' + cls : '');
+  el.lastElementChild.textContent = text;
+}
+
+// ── Painel (overview) ────────────────────────────────────────────────────
+
+function renderOverview(o) {
+  const c = o.counts || {};
+  const s = o.service || {};
+  const sync = o.sync || {};
+
+  $('stApi').textContent = s.version ? 'v' + s.version : 'online';
+  $('stApiSub').textContent = `${s.node || 'node'} · uptime ${fmtUptime(s.uptimeSeconds)}`;
+  $('stUsers').textContent = c.users ?? '—';
+  $('stVehicles').textContent = c.vehicles ?? '—';
+  $('stVehiclesSub').textContent = `${c.onlineVehicles ?? 0} online · ${c.blockedVehicles ?? 0} bloqueados · ${c.simulatedVehicles ?? 0} simulador`;
+  $('stDevices').textContent = c.devices ?? '—';
+  $('stTelemetry').textContent = c.telemetryPoints ?? '—';
+  $('stRoutes').textContent = c.routes ?? '—';
+  $('stRoutesSub').textContent = `${c.activeRoutes ?? 0} em andamento`;
+  $('stCommands').textContent = c.commands ?? '—';
+  $('stCommandsSub').textContent = `${c.pendingCommands ?? 0} pendentes`;
+  $('stMobile').textContent = c.mobileLocations ?? '—';
+  $('stMobileSub').textContent = `${c.recentMobileLocations ?? 0} recentes · teste real (app, fora do simulador)`;
+  $('stRealTest').textContent = (c.realVehicles ?? 0);
+  $('stRealTestSub').textContent = `${c.realVehicles ?? 0} veículo(s) reais · ${c.simulatedVehicles ?? 0} no simulador`;
+  $('cardCommands').classList.toggle('warnv', (c.pendingCommands || 0) > 0);
+
+  $('chipApi').className = 'chip live';
+  $('chipApi').lastElementChild.textContent = 'online';
+
+  const rows = [
+    ['Serviço', s.name || '—'],
+    ['Versão', (s.version || '—') + ' · ' + (s.env || '—')],
+    ['Porta', s.port ?? '—'],
+    ['PID', s.pid ?? '—'],
+    ['Uptime', fmtUptime(s.uptimeSeconds)],
+    ['Iniciado em', fmtTime(s.startedAt)],
+    ['Banco', s.dbPath || '—'],
+    ['Sync Firebase', (sync.enabled ? 'ligado' : 'desligado') + ' · ' + (sync.credentials || '—')],
+    ['Última sync', sync.lastRun ? fmtTime(sync.lastRun) : 'nunca'],
+  ];
+  $('serviceKV').innerHTML = rows
+    .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`)
+    .join('');
+
+  renderUsers(o.users || []);
+  renderScreens(o.screens || []);
+  // Mapa: guarda a última posição do celular por usuário, para exibir o
+  // aparelho "junto do veículo" quando o proprietário está selecionado.
+  mobileByUser = {};
+  for (const u of o.users || []) {
+    if (u && u.mobileLocation) mobileByUser[u.id] = u.mobileLocation;
+  }
+  renderRealTest(o);
+  updatePhoneMarker();
+}
+
+function renderUsers(users) {
+  const box = $('users');
+  const vehicleCount = users.reduce((n, u) => n + u.vehicles.length, 0);
+  $('usersMeta').textContent = `${users.length} usuário(s) · ${vehicleCount} veículo(s)`;
+
+  if (!users.length) {
+    box.innerHTML = '<div class="empty-state">Nenhum usuário cadastrado.</div>';
+    return;
+  }
+
+  box.innerHTML = users.map((u) => {
+    const vehicles = u.vehicles.length
+      ? u.vehicles.map((v) => {
+          const badges = [
+            v.online ? '<span class="badge on">online</span>' : '<span class="badge off">offline</span>',
+            v.isBlocked ? '<span class="badge blocked">bloqueado</span>' : '',
+            v.simulated ? '<span class="badge sim">simulador</span>' : '<span class="badge real">teste real</span>',
+          ].join('');
+          return `
+            <div class="vehicle">
+              <div>
+                <span class="plate">${esc(v.plate)}</span>${badges}
+                <div class="model">${esc(v.brand)} ${esc(v.model)} · ${esc(v.year)}${v.color ? ' · ' + esc(v.color) : ''}</div>
+              </div>
+              <div class="right">
+                <div>${v.speed ?? 0} km/h</div>
+                <div>${esc(v.device ? v.device.deviceId : 'sem device')}</div>
+                <div>${fmtAgo(v.lastUpdate)}</div>
+              </div>
+            </div>`;
+        }).join('')
+      : '<div class="model" style="margin-top:6px;color:var(--muted);font-size:12px">Nenhum veículo.</div>';
+
+    return `
+      <div class="user">
+        <div class="who">
+          <b>${esc(u.name)}</b>
+          <span class="email">${esc(u.email)}</span>
+          <span class="id">#${u.id}${u.phone ? ' · ' + esc(u.phone) : ''}</span>
+        </div>
+        ${vehicles}
+      </div>`;
+  }).join('');
+}
+
+function renderScreens(screens) {
+  const ok = screens.filter((s) => s.status === 'ok').length;
+  $('screensMeta').textContent = `${ok}/${screens.length} ok`;
+  $('screens').innerHTML = screens.map((s) => `
+    <div class="screen">
+      <div class="top"><span class="dot ${esc(s.status)}"></span><span class="name">${esc(s.name)}</span></div>
+      <div class="ep">${esc(s.endpoint)}</div>
+      <div class="detail">${esc(s.detail)}</div>
+    </div>`).join('');
+}
+
+// Dados NÃO ligados ao simulador: posições do celular (app) e veículos reais.
+// São apresentados como "teste real", evidência de funcionamento fora da simulação.
+function renderRealTest(o) {
+  const box = $('realTest');
+  const chip = $('chipReal');
+  const users = o.users || [];
+  const phones = users.filter((u) => u.mobileLocation);
+  const realVehicles = [];
+  for (const u of users) {
+    for (const v of u.vehicles || []) {
+      if (!v.simulated) realVehicles.push({ user: u, vehicle: v });
+    }
+  }
+
+  const livePhones = (phones.filter((u) => u.mobileLocation.timestamp >= Date.now() - 5 * 60 * 1000)).length;
+
+  if (!phones.length && !realVehicles.length) {
+    box.innerHTML = '<div class="empty-state">Ainda sem dados reais. Envie a posição do celular pelo app para vê-la aqui.</div>';
+    setChip(chip, 'warn', 'aguardando teste real');
+    return;
+  }
+  setChip(chip, livePhones > 0 ? 'live' : '', livePhones > 0 ? `${livePhones} celular(es) ao vivo` : 'sem celular ao vivo');
+
+  const rows = [];
+  for (const u of phones) {
+    const m = u.mobileLocation;
+    rows.push(`
+      <div class="rt-row">
+        <b>📱 ${esc(u.name)} · celular</b>
+        <span class="rt-sub">${(m.latitude ?? 0).toFixed(5)}, ${(m.longitude ?? 0).toFixed(5)} · precisão ${(m.accuracy ?? 0).toFixed(1)} m · ${esc(m.source || 'app')} · ${fmtAgo(m.timestamp)}</span>
+      </div>`);
+  }
+  for (const r of realVehicles) {
+    rows.push(`
+      <div class="rt-row">
+        <b>🚗 ${esc(r.vehicle.plate)} · veículo real</b>
+        <span class="rt-sub">${esc(r.vehicle.brand)} ${esc(r.vehicle.model)} · ${r.vehicle.online ? 'online' : 'offline'} · de ${esc(r.user.name)}</span>
+      </div>`);
+  }
+  box.innerHTML = rows.join('');
+}
+
+async function refreshOverview() {
+  if (!state.token) return;
+  const res = await api('/v1/admin/overview');
+  if (res.ok) renderOverview(res.data);
+}
+
 // ── Mapa ─────────────────────────────────────────────────────────────────
 
 const map = L.map('map', { zoomControl: true }).setView([-23.5505, -46.6333], 13);
@@ -194,9 +560,29 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
 }).addTo(map);
 
 const marker = L.circleMarker([-23.5505, -46.6333], {
-  radius: 9, color: '#fff', weight:2, fillColor:'#4c8dff', fillOpacity: .95,
+  radius: 9, color: '#fff', weight: 2, fillColor: '#4c8dff', fillOpacity: .95,
 }).addTo(map);
+
+// Marcador do CELULAR (teste real): exibido junto do veículo quando o
+// proprietário enviou a posição pelo app.
+const phoneMarker = L.circleMarker([-23.5505, -46.6333], {
+  radius: 7, color: '#fff', weight: 1.5, fillColor: '#2979ff', fillOpacity: .95,
+});
+let mobileByUser = {};
 let centered = false;
+
+function updatePhoneMarker() {
+  const info = (state.vehiclesById || {})[state.vehicleId];
+  const loc = info && info.userId != null ? mobileByUser[info.userId] : null;
+  const legend = $('mapPhoneLegend');
+  if (loc && loc.latitude != null && loc.longitude != null) {
+    phoneMarker.setLatLng([loc.latitude, loc.longitude]).addTo(map);
+    if (legend) legend.hidden = false;
+  } else {
+    if (phoneMarker._map) phoneMarker.remove();
+    if (legend) legend.hidden = true;
+  }
+}
 
 function setHud(plate, speed, lat, lng, battery, blocked) {
   state.vehicle = { plate, speed, latitude: lat, longitude: lng, battery, isBlocked: !!blocked };
@@ -243,7 +629,7 @@ function renderLogs() {
     <div class="row">
       <span class="t">${t(r.at)}</span>
       <span class="m m${r.method}">${r.method}</span>
-      <span class="p" title="${r.path}">${r.path}</span>
+      <span class="p" title="${esc(r.path)}">${esc(r.path)}</span>
       <span class="s ${statusClass(r.status)}">${r.status}</span>
       <span class="d">${r.durationMs ?? ''}${r.durationMs != null ? 'ms' : ''}</span>
     </div>`).join('');
@@ -256,15 +642,11 @@ $('onlyErr').addEventListener('change', renderLogs);
 
 // ── Streams ──────────────────────────────────────────────────────────────
 
-function setChip(el, cls, text) {
-  el.className = 'chip' + (cls ? ' ' + cls : '');
-  el.lastElementChild.textContent = text;
-}
-
 async function startLogStream() {
   stopLogStream();
   const ctrl = new AbortController();
   state.logStream = ctrl;
+  setChip($('chipStream'), 'warn', 'conectando');
 
   // Histórico primeiro, depois o stream assume sem repetir nada.
   const hist = await api('/v1/admin/logs?limit=200');
@@ -282,7 +664,7 @@ async function startLogStream() {
           if (entry.seq <= state.lastSeq) return;
           state.lastSeq = entry.seq;
           addRow(entry);
-        }, ctrl.signal);
+        }, ctrl.signal, () => setChip($('chipStream'), 'live', 'ao vivo'));
       } catch (e) {
         if (e.name === 'AbortError' || ctrl.signal.aborted) return;
       }
@@ -301,8 +683,6 @@ async function startLogStream() {
       await new Promise((r) => setTimeout(r, 2000));
     }
   })();
-
-  setChip($('chipStream'), 'live', 'ao vivo');
 }
 
 function stopLogStream() {
@@ -346,7 +726,7 @@ async function startTelemetryStream(vehicleId) {
   })();
 }
 
-// ── Login / veículos ─────────────────────────────────────────────────────
+// ── Sessão / veículos ────────────────────────────────────────────────────
 
 async function loadVehicles() {
   const res = await api('/v1/vehicles');
@@ -359,7 +739,9 @@ async function loadVehicles() {
     return;
   }
   sel.hidden = false;
+  state.vehiclesById = {};
   for (const v of list) {
+    state.vehiclesById[v.id] = { userId: v.userId, plate: v.plate };
     const opt = document.createElement('option');
     opt.value = v.id;
     opt.textContent = `${v.plate} — ${v.brand} ${v.model}`;
@@ -377,8 +759,18 @@ async function selectVehicle(id) {
     const v = res.data.vehicle;
     setHud(v.plate, v.speed, v.latitude, v.longitude, null, v.isBlocked);
     if (v.latitude && v.longitude) { moveMarker(v.latitude, v.longitude, true); }
+    if (v.userId != null) { state.vehiclesById[id] = { userId: v.userId, plate: v.plate }; }
   }
+  updatePhoneMarker();
   await startTelemetryStream(id);
+}
+
+function startRefreshTimer() {
+  stopRefreshTimer();
+  state.refreshTimer = setInterval(refreshOverview, 7000);
+}
+function stopRefreshTimer() {
+  if (state.refreshTimer) { clearInterval(state.refreshTimer); state.refreshTimer = null; }
 }
 
 $('loginForm').addEventListener('submit', async (ev) => {
@@ -397,23 +789,46 @@ $('loginForm').addEventListener('submit', async (ev) => {
   state.token = res.data.token;
   setChip($('chipAuth'), 'live', 'autenticado');
   $('btnLogout').hidden = false;
-  await startLogStream();
-  await loadVehicles();
+  await Promise.all([startLogStream(), loadVehicles(), refreshOverview()]);
+  startRefreshTimer();
 });
 
 $('btnLogout').addEventListener('click', async () => {
   if (state.token) await api('/v1/auth/logout', { method: 'POST' });
   state.token = null;
   stopLogStream();
+  stopRefreshTimer();
   if (state.telStream) state.telStream.abort();
   $('btnLogout').hidden = true;
   setChip($('chipAuth'), '', 'desconectado');
+  setChip($('chipApi'), '', '—');
+  $('chipApi').lastElementChild.textContent = '—';
   rows.length = 0;
   renderLogs();
+  $('users').innerHTML = '<div class="empty-state">Entre para listar os usuários do sistema.</div>';
+  $('serviceKV').innerHTML = '<div class="empty-state">—</div>';
+  $('screens').innerHTML = '<div class="empty-state">—</div>';
+  $('screensMeta').textContent = '—';
+  $('usersMeta').textContent = '—';
+  $('realTest').innerHTML = '<div class="empty-state">—</div>';
+  setChip($('chipReal'), '', '—');
+  $('mapPhoneLegend').hidden = true;
+  if (phoneMarker._map) phoneMarker.remove();
 });
 
 setChip($('chipStream'), '', 'parado');
 setChip($('chipAuth'), '', 'desconectado');
+
+// ── Tema claro/escuro ────────────────────────────────────────────────────
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  $('btnTheme').textContent = theme === 'light' ? '☾' : '☀';
+  try { localStorage.setItem('securitas-theme', theme); } catch { /* modo privado */ }
+}
+applyTheme(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
+$('btnTheme').addEventListener('click', () => {
+  applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
+});
 </script>
 </body>
 </html>

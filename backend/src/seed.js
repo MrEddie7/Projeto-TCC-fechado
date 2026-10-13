@@ -33,8 +33,8 @@ function registerVehicle(plate = DEMO.plate, model = DEMO.model, brand = DEMO.br
   const now = Date.now();
   const info = db
     .prepare(
-      `INSERT INTO vehicles (user_id, plate, model, brand, year, color, latitude, longitude, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO vehicles (user_id, plate, model, brand, year, color, latitude, longitude, created_at, updated_at, simulated)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`
     )
     .run(
       user.id,
@@ -62,7 +62,7 @@ function ensureDevice(v) {
   const deviceId = `vt_${randomBytes(8).toString('hex')}`;
   const apiKey = randomBytes(24).toString('hex');
   db.prepare(
-    'INSERT INTO devices (device_id, api_key, vehicle_id, created_at) VALUES (?, ?, ?, ?)'
+    'INSERT INTO devices (device_id, api_key, vehicle_id, created_at, simulated) VALUES (?, ?, ?, ?, 1)'
   ).run(deviceId, apiKey, v.id, Date.now());
   return { device: db.prepare('SELECT * FROM devices WHERE vehicle_id = ?').get(v.id), created: true };
 }

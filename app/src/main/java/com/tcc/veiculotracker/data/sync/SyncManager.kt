@@ -115,6 +115,14 @@ class SyncManager(
     }
 
     /**
+     * Busca a última localização do celular do usuário no backend.
+     */
+    suspend fun getLatestMobileLocationFromBackend(): Result<ApiClient.MobileLocationDto?> {
+        return backendRepository?.getLatestMobileLocation()
+            ?: Result.failure(IllegalStateException("BackendRepository não configurado"))
+    }
+
+    /**
      * Busca o histórico de telemetria do veículo no backend.
      */
     suspend fun getTelemetryHistoryFromBackend(vehicleId: Long, limit: Int = 100): Result<List<ApiClient.TelemetryDto>> {

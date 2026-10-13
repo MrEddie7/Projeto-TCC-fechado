@@ -167,6 +167,16 @@ class BackendRepository(
         return apiClient.getLatestTelemetry(vehicleId)
     }
 
+    // ── Localização do celular (GPS do usuário) ──────────────────────────
+
+    /**
+     * Busca a última localização do celular deste usuário registrada no backend.
+     * Permite exibir o aparelho "junto do veículo" no mapa de rastreamento.
+     */
+    suspend fun getLatestMobileLocation(): Result<ApiClient.MobileLocationDto?> {
+        return apiClient.getLatestMobileLocation()
+    }
+
     /**
      * Busca o histórico de telemetria do veículo no backend.
      */

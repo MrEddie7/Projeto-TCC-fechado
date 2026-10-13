@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Marcador do CELULAR do usuário no mapa de rastreamento.
+  Círculo azul com centro branco (estilo "estou aqui"), distinto do
+  marcador padrão (teardrop) usado para o veículo.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="36dp"
+    android:height="36dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- bordo branco para contraste no mapa -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,2a10,10 0 1,0 0.0001,0z" />
+    <!-- círculo azul -->
+    <path
+        android:fillColor="#2979FF"
+        android:pathData="M12,3.6a8.4,8.4 0 1,0 0,16.8a8.4,8.4 0 1,0 0,-16.8z" />
+    <!-- centro branco -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,9a3,3 0 1,0 0,6a3,3 0 1,0 0,-6z" />
+</vector>

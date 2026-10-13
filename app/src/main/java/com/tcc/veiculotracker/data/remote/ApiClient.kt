@@ -111,6 +111,30 @@ class ApiClient(private val context: Context) {
         return post("/v1/mobile/location", body).map { true }
     }
 
+    data class MobileLocationDto(
+        val id: Long,
+        val userId: Long,
+        val latitude: Double,
+        val longitude: Double,
+        val speed: Double,
+        val heading: Double,
+        val accuracy: Double,
+        val timestamp: Long,
+        val source: String
+    )
+
+    /**
+     * Busca a última localização do celular deste usuário cadastrada no backend.
+     * Usada para exibir o aparelho "junto do veículo" no mapa de rastreamento.
+     */
+    suspend fun getLatestMobileLocation(): Result<MobileLocationDto?> {
+        return get("/v1/mobile/location/latest").map { json ->
+            val obj = JsonParser.parseString(json).asJsonObject
+            val location = obj.get("location")
+            if (location.isJsonNull) null else gson.fromJson(location, MobileLocationDto::class.java)
+        }
+    }
+
     // ── Veículos ──────────────────────────────────────────────────────────
 
     data class VehicleDto(

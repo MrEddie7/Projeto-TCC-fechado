@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS vehicles (
   longitude   REAL NOT NULL DEFAULT 0,
   speed       REAL NOT NULL DEFAULT 0,
   last_update INTEGER NOT NULL DEFAULT 0,
+  simulated   INTEGER NOT NULL DEFAULT 0,
   created_at  INTEGER NOT NULL
 );
 
@@ -52,6 +53,7 @@ CREATE TABLE IF NOT EXISTS devices (
   firmware    TEXT DEFAULT '',
   model       TEXT DEFAULT '',
   last_seen   INTEGER DEFAULT 0,
+  simulated   INTEGER NOT NULL DEFAULT 0,
   created_at  INTEGER NOT NULL
 );
 
@@ -137,3 +139,33 @@ function ensureColumn(table, column, ddl) {
 ensureColumn('users', 'updated_at', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('vehicles', 'updated_at', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('routes', 'updated_at', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('vehicles', 'simulated', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('devices', 'simulated', 'INTEGER NOT NULL DEFAULT 0');
+
+// Retrocompatibilidade: marca como "simulador" a frota criada pelo seed do
+// projeto (única origem de devices para o hardware-simulator até aqui).
+// Roda uma única vez e fica registrada em sync_state; os dados criados depois
+// (via app/API) nascem com simulated=0, ou seja, "teste real".
+function markSeedFleetSimulatedOnce() {
+  const done = db.prepare("SELECT value FROM sync_state WHERE key = 'backfill_simulated_v1'").get();
+  if (done) return;
+  const demoEmail = process.env.SEED_EMAIL || 'aluno@tcc.com';
+  const demoUser = db.prepare('SELECT id FROM users WHERE email = ?').get(demoEmail);
+  if (demoUser) {
+    db.prepare(
+      `UPDATE vehicles SET simulated = 1
+       WHERE simulated = 0
+         AND user_id = ?
+         AND id IN (SELECT vehicle_id FROM devices WHERE vehicle_id IS NOT NULL)`
+    ).run(demoUser.id);
+    db.prepare(
+      `UPDATE devices SET simulated = 1
+       WHERE simulated = 0
+         AND vehicle_id IN (SELECT id FROM vehicles WHERE simulated = 1)`
+    ).run();
+  }
+  db.prepare(
+    "INSERT OR IGNORE INTO sync_state (key, value) VALUES ('backfill_simulated_v1', 1)"
+  ).run();
+}
+markSeedFleetSimulatedOnce();

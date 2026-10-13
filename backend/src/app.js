@@ -9,9 +9,11 @@ import telemetryRoutes from './routes/telemetry.routes.js';
 import commandsRoutes from './routes/commands.routes.js';
 import routesRoutes from './routes/routes.routes.js';
 import hardwareRoutes from './routes/hardware.routes.js';
+import mobileRoutes from './routes/mobile.routes.js';
 import { syncOnce } from './services/firebase-sync.service.js';
 import { getFirebase, getFirebaseInitError } from './firebase/firebase-admin.js';
 import { recordRequest, listLogs, subscribeLogs, logStats } from './services/log-buffer.service.js';
+import { buildOverview } from './services/overview.service.js';
 import { requireAuth } from './middleware/auth.js';
 import { db } from './db/database.js';
 
@@ -31,7 +33,7 @@ export function createApp() {
     next();
   });
 
-  // Sempre registramos no buffer em memória (a página /debug depende dele),
+  // Sempre registramos no buffer em memória (a página web depende dele),
   // mas só escrevemos no console quando LOG_REQUESTS estiver ligado.
   app.use((req, res, next) => {
     const startedAt = process.hrtime.bigint();
@@ -52,9 +54,9 @@ export function createApp() {
 
   app.get('/health', (_req, res) => res.json({ ok: true, service: 'veiculotracker-backend', time: Date.now() }));
 
-  // Índice da API: evita 404 ao abrir a URL base no navegador e serve de
-  // referência rápida dos endpoints durante o desenvolvimento.
-  app.get('/', (_req, res) =>
+  // Índice da API: referência rápida dos endpoints em /api. A raiz (/) fica
+  // reservada para a aplicação web do painel (public/index.html).
+  app.get('/api', (_req, res) =>
     res.json({
       service: 'veiculotracker-backend',
       description: 'API de ponte entre o hardware rastreador (GPS IoT) e o app Securitas',
@@ -89,10 +91,17 @@ export function createApp() {
           'GET /v1/hardware/:deviceId/commands',
           'POST /v1/hardware/:deviceId/commands/:commandId/ack',
         ],
-        admin: ['POST /v1/admin/sync', 'GET /v1/admin/sync-status', 'GET /v1/admin/logs', 'GET /v1/admin/logs/stream'],
+        mobile: ['POST /v1/mobile/location', 'GET /v1/mobile/location/latest'],
+        admin: [
+          'POST /v1/admin/sync',
+          'GET /v1/admin/sync-status',
+          'GET /v1/admin/overview',
+          'GET /v1/admin/logs',
+          'GET /v1/admin/logs/stream',
+        ],
       },
       auth: 'Bearer <token> no app; headers x-device-id e x-api-key no hardware',
-      debug: 'GET /debug (mapa + logs em tempo real)',
+      dashboard: 'GET / (painel web: usuários/veículos, status das telas, mapa e logs)',
       docs: 'backend/API_ESTRUTURA.txt',
     })
   );
@@ -103,6 +112,7 @@ export function createApp() {
   app.use('/v1/vehicles', commandsRoutes);
   app.use('/v1', routesRoutes);
   app.use('/v1/hardware', hardwareRoutes);
+  app.use('/v1/mobile', mobileRoutes);
 
   // Força uma rodada de sincronização SQLite -> Firebase manualmente.
   // Com ?full=1 (ou {"full":true}) zera as marcas d'água e reenvia tudo.
@@ -110,6 +120,11 @@ export function createApp() {
     const full = req.query.full === '1' || req.body?.full === true;
     const result = await syncOnce({ full });
     res.json({ ok: true, full, ...result });
+  });
+
+  // Painel administrativo: estado da API, usuários+veículos e saúde das telas.
+  app.get('/v1/admin/overview', requireAuth, (_req, res) => {
+    res.json(buildOverview());
   });
 
   // Status da sincronização
@@ -130,8 +145,8 @@ export function createApp() {
     res.json(logStats());
   });
 
-  // Página de diagnóstico: mapa + logs da API, sem build nem framework.
-  app.use('/debug', express.static(path.join(__dirname, '..', 'public')));
+  // Compatibilidade: a antiga página de diagnóstico vivia em /debug.
+  app.get(['/debug', '/debug/*'], (_req, res) => res.redirect(301, '/'));
 
   // Histórico de requisições. ?since=<seq> devolve só o que é novo.
   app.get('/v1/admin/logs', requireAuth, (req, res) => {
@@ -150,6 +165,9 @@ export function createApp() {
     res.flushHeaders?.();
     subscribeLogs(res);
   });
+
+  // Aplicação web do painel: HTML+JS puro servido na raiz (sem build/framework).
+  app.use(express.static(path.join(__dirname, '..', 'public')));
 
   app.use(notFound);
   app.use(errorHandler);

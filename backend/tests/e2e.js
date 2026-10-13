@@ -189,6 +189,46 @@ console.log('== 8. Sincronização (Firebase desativado) ==');
   ok('sync-status exige auth e retorna info', st.json.intervalMs === 60000);
 }
 
+console.log('== 9. Painel administrativo (overview) ==');
+{
+  ok('overview exige token', (await api('GET', '/v1/admin/overview')).status === 401);
+
+  const r = await api('GET', '/v1/admin/overview', { token });
+  ok('overview responde 200', r.status === 200, JSON.stringify(r.json).slice(0, 120));
+  ok('overview traz estado do serviço', !!r.json.service?.name && r.json.service.port > 0);
+  ok('overview conta usuários', r.json.counts?.users >= 1);
+  ok('overview conta veículos', r.json.counts?.vehicles >= 1);
+
+  const me = r.json.users?.find((u) => u.email === 'aluno@tcc.com');
+  ok('overview lista usuário com veículos', !!me && me.vehicles.length >= 1);
+  ok('overview veículo tem device', !!me?.vehicles?.[0]?.device?.deviceId);
+  ok('overview veículo tem telemetria', me?.vehicles?.[0]?.telemetry?.speed !== undefined);
+
+  ok('overview traz status das telas', Array.isArray(r.json.screens) && r.json.screens.length >= 10);
+  const tracking = r.json.screens?.find((s) => s.id === 'tracking');
+  ok('tela de rastreamento marcada como ok', tracking?.status === 'ok');
+}
+
+console.log('== 10. Localização do celular (/v1/mobile) ==');
+{
+  ok('mobile/location exige token', (await api('POST', '/v1/mobile/location', { body: {} })).status === 401);
+
+  const bad = await api('POST', '/v1/mobile/location', {
+    token,
+    body: { latitude: 999, longitude: 0 },
+  });
+  ok('rejeita coordenadas inválidas', bad.status === 400);
+
+  const created = await api('POST', '/v1/mobile/location', {
+    token,
+    body: { latitude: -23.561, longitude: -46.655, speed: 12, heading: 45, accuracy: 8 },
+  });
+  ok('grava localização do celular', created.status === 201 && created.json.location?.id > 0);
+
+  const latest = await api('GET', '/v1/mobile/location/latest', { token });
+  ok('lê última localização do celular', latest.json.location?.latitude === -23.561);
+}
+
 console.log('');
 console.log(`Resultado: ${passed} passou, ${failed} falhou`);
 db.close();

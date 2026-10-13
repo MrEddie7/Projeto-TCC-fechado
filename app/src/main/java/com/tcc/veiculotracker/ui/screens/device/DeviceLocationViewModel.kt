@@ -17,6 +17,7 @@ data class DeviceLocationState(
     val currentLocation: Location? = null,
     val isTracking: Boolean = false,
     val isSendingToBackend: Boolean = false,
+    val isAutoSend: Boolean = false,
     val lastSentTime: Long = 0L,
     val sendStatus: String? = null,
     val error: String? = null,
@@ -145,6 +146,24 @@ class DeviceLocationViewModel(application: Application) : AndroidViewModel(appli
     fun stopAutoSend() {
         sendJob?.cancel()
         sendJob = null
+    }
+
+    /**
+     * Liga/desliga o envio automático da posição do celular para a API.
+     * Com isso a API sempre conhece a posição atual do aparelho, permitindo
+     * exibi-lo "junto do veículo" em qualquer cliente (app ou painel web).
+     */
+    fun setAutoSend(enabled: Boolean) {
+        if (enabled) {
+            if (!backendRepository.isConfigured) {
+                _state.value = _state.value.copy(error = "Backend não configurado para envio automático")
+                return
+            }
+            startAutoSend()
+        } else {
+            stopAutoSend()
+        }
+        _state.value = _state.value.copy(isAutoSend = enabled)
     }
 
     fun clearError() {

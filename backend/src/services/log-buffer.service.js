@@ -1,6 +1,6 @@
 // Buffer circular em memória com as últimas requisições atendidas.
 //
-// Existe para a página de diagnóstico (/debug) poder mostrar o que está
+// Existe para o painel web (raiz /) poder mostrar o que está
 // acontecendo na API sem depender dos arquivos de log: o buffer vive no
 // mesmo processo, então funciona igual independente de como a API foi
 // iniciada (npm start, api.sh, api.ps1, PM2...).

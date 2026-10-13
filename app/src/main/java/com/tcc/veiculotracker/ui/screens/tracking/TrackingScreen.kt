@@ -1,5 +1,6 @@
 package com.tcc.veiculotracker.ui.screens.tracking
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -18,7 +19,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tcc.veiculotracker.ui.components.TrackingMap
 import com.tcc.veiculotracker.ui.theme.Active
 import com.tcc.veiculotracker.ui.theme.Blocked
+import com.tcc.veiculotracker.ui.theme.Primary
 import com.tcc.veiculotracker.ui.theme.Warning
+import androidx.compose.ui.graphics.Color
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -158,9 +161,31 @@ fun TrackingScreen(
                         latitude = state.currentLatitude,
                         longitude = state.currentLongitude,
                         animate = state.isTracking,
+                        phoneLatitude = if (state.isPhoneVisible) state.phoneLatitude else 0.0,
+                        phoneLongitude = if (state.isPhoneVisible) state.phoneLongitude else 0.0,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(240.dp)
+                    )
+
+                    // Legenda: veículo + celular no mesmo mapa (funções vinculadas)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        MapLegendDot(color = Warning, label = "Veículo")
+                        MapLegendDot(color = Primary, label = "Celular (você)")
+                    }
+
+                    Text(
+                        text = phoneStatusText(state),
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp)
+                            .padding(bottom = 10.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
                 }
 
@@ -220,4 +245,49 @@ fun TrackingScreen(
             }
         }
     }
+}
+
+@Composable
+private fun MapLegendDot(color: Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier.size(10.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(color)
+            )
+        }
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+        )
+    }
+}
+
+/**
+ * Status textual de como a localização do celular está vinculada ao
+ * rastreamento do veículo (GPS local + envio à API).
+ */
+private fun phoneStatusText(state: TrackingState): String = when {
+    state.isTracking && !state.phonePermissionGranted ->
+        "Celular não rastreado: conceda a permissão de localização para vê-lo junto do veículo"
+
+    state.isTracking && state.isPhoneVisible && state.phoneLastSentAt > 0 -> {
+        val elapsed = (System.currentTimeMillis() - state.phoneLastSentAt) / 1000
+        "Celular ao vivo junto do veículo · posição enviada à API há ${elapsed}s"
+    }
+
+    state.isTracking && state.isPhoneVisible ->
+        "Celular ao vivo junto do veículo · aguardando envio à API"
+
+    state.isPhoneVisible ->
+        "Última posição do celular: ${String.format("%.5f", state.phoneLatitude)}, ${String.format("%.5f", state.phoneLongitude)}"
+
+    else -> "Inicie o rastreamento para localizar o celular junto do veículo"
 }

@@ -51,6 +51,7 @@
    routes/commands.routes.js     - enviar e listar comandos
    routes/routes.routes.js       - start/stop rotas + pontos geográficos
    routes/hardware.routes.js     - endpoints consumidos pelo firmware
+   routes/mobile.routes.js       - localização do celular do app (Bearer)
    services/telemetry.service.js - ingere pontos, atualiza veículo/rota
    services/command.service.js   - fila block/unblock + ACK
    services/auth.service.js      - scrypt, tokens Bearer
@@ -268,6 +269,17 @@
 
  DELETE /v1/routes/:routeId  🔒
    resp 200: { ok:true }
+
+ ── Localização do celular ──────────────────────────────────────────────────
+ POST /v1/mobile/location  🔒
+   body: { latitude, longitude, speed?, heading?, accuracy?, timestamp?, source? }
+   resp 201: { ok:true, location:{id,userId,latitude,longitude,speed,heading,
+                                  accuracy,timestamp,source} }
+   400 sem lat/lng ou coordenadas fora de [-90..90]/[-180..180].
+   Usado pelo app Android (ApiClient) para enviar a posição do próprio celular.
+
+ GET /v1/mobile/location/latest  🔒
+   resp 200: { location:{...} | null }  (última posição do usuário logado)
 
  ── Admin / sincronização ───────────────────────────────────────────────────
  POST /v1/admin/sync  🔒 (força uma rodada manual)
@@ -520,6 +532,30 @@
    Cada simulador retoma da posicao atual do seu veiculo (campo /status),
    entao a frota nao nasce empilhada em um unico ponto.
 
-   Na pagina /debug, use o seletor de veiculos para acompanhar cada um.
+   Na pagina inicial (http://localhost:3000), use o seletor de veiculos para
+   acompanhar cada um. A antiga URL /debug redireciona para a raiz.
+
+================================================================================
+ TESTE REAL X SIMULADOR (exibicao web)
+================================================================================
+ O painel da raiz distingue dados do simulador dos dados de TESTE REAL, que
+ entram por fora da simulacao (app mobile / API de uso real).
+
+   Origem dos dados (colunas `simulated` em vehicles e devices):
+     simulated = 1  -> frota criada por `npm run seed` e seus simuladores
+     simulated = 0  -> veiculos/devices criados via /v1/vehicles (app/tests)
+                        e posicoes do celular (/v1/mobile/location)
+
+   O que a pagina apresenta como "teste real (fora da simulacao)":
+     - posicoes do celular recebidas do app (mobile_locations);
+     - veiculos com simulated = 0;
+     - badge "teste real" x "simulador" em cada veiculo da lista de usuarios;
+     - cartao "Teste real" no topo e painel dedicado na coluna esquerda;
+     - no mapa, marcador azul do celular junto do veiculo quando o proprietario
+       ja enviou a posicao pelo app (legenda "Celular (teste real)").
+
+   O overview (/v1/admin/overview) expoe: counts.simulatedVehicles,
+   counts.realVehicles, counts.simulatedDevices, counts.realDevices e, por
+   usuario, vehicles[].simulated, devices[].simulated e user.realTest.
 
 ================================================================================
