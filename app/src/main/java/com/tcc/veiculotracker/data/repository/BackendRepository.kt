@@ -115,6 +115,35 @@ class BackendRepository(
     }
 
     /**
+     * Envia para o backend os veículos que existem APENAS localmente (por
+     * exemplo, cadastrados antes de o backend estar configurado). Assim eles
+     * também aparecem no painel do administrador. É best-effort: veículos cujo
+     * cadastro no backend falhar continuam apenas locais e são tentados de novo
+     * na próxima sincronização. Veículos cuja placa já existe no backend são
+     * ignorados (o backend rejeitaria placa duplicada).
+     */
+    suspend fun pushLocalVehiclesToBackend(userId: Long): Result<Int> {
+        return apiClient.getVehicles().map { remote ->
+            val remotePlates = remote.map { it.plate.uppercase() }.toSet()
+            val locals = vehicleDao.getVehiclesListByUser(userId)
+            var pushed = 0
+            for (local in locals) {
+                if (local.plate.uppercase() in remotePlates) continue
+                apiClient.createVehicle(local.plate, local.model, local.brand, local.year, local.color)
+                    .onSuccess { dto ->
+                        // Substitui a versão local pelo registro do backend, já
+                        // com o id do servidor (mesma placa/dados).
+                        vehicleDao.delete(local)
+                        vehicleDao.insert(dto.toEntity())
+                        pushed++
+                    }
+            }
+            Log.d(TAG, "Enviados $pushed veículo(s) local(is) para o backend")
+            pushed
+        }
+    }
+
+    /**
      * Atualiza um veículo no backend e localmente.
      */
     suspend fun updateVehicle(vehicle: Vehicle): Result<Vehicle> {

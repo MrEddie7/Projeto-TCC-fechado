@@ -267,13 +267,16 @@
           <div id="map"></div>
           <div class="hud" id="hud" hidden>
             <div>placa <b id="hudPlate">—</b> <span id="hudBlocked"></span></div>
+            <div id="hudOwner" hidden>dono <b id="hudOwnerName">—</b></div>
             <div>velocidade <b id="hudSpeed">—</b> km/h</div>
             <div>lat <b id="hudLat">—</b> · lon <b id="hudLng">—</b></div>
             <div>bateria <b id="hudBat">—</b>%</div>
           </div>
         </div>
-        <div style="display:flex; gap:16px; padding:8px 12px; font-size:11.5px; color:var(--muted); align-items:center">
-          <span><b style="color:var(--info)">●</b> Veículo (telemetria)</span>
+        <div style="display:flex; gap:16px; padding:8px 12px; font-size:11.5px; color:var(--muted); align-items:center; flex-wrap:wrap">
+          <span><b style="color:var(--info)">●</b> Veículo selecionado</span>
+          <span><b style="color:var(--ok)">●</b> Frota real (todos os usuários)</span>
+          <span><b style="color:var(--warn)">●</b> Frota simulador</span>
           <span id="mapPhoneLegend" hidden><b style="color:#2979ff">●</b> Celular (teste real) · junto do veículo</span>
         </div>
       </section>
@@ -444,6 +447,9 @@ function renderOverview(o) {
     if (u && u.mobileLocation) mobileByUser[u.id] = u.mobileLocation;
   }
   renderRealTest(o);
+  // Mapa: desenha a frota inteira (veículos de todos os usuários) e depois o
+  // marcador do celular do proprietário selecionado.
+  renderFleet(o.vehicles || []);
   updatePhoneMarker();
 }
 
@@ -568,8 +574,45 @@ const marker = L.circleMarker([-23.5505, -46.6333], {
 const phoneMarker = L.circleMarker([-23.5505, -46.6333], {
   radius: 7, color: '#fff', weight: 1.5, fillColor: '#2979ff', fillOpacity: .95,
 });
+// Camada com TODOS os veículos cadastrados (frota do administrador). Cada
+// marcador é clicável e seleciona o veículo no seletor/mapa principal.
+const fleetLayer = L.layerGroup().addTo(map);
+let fleetByVehicle = {};
 let mobileByUser = {};
 let centered = false;
+
+// Desenha no mapa a frota inteira (todos os usuários). Cor: verde = teste real
+// (fora do simulador), amarelo = simulador. Veículos offline ficam esmaecidos.
+function renderFleet(vehicles) {
+  fleetLayer.clearLayers();
+  fleetByVehicle = {};
+  for (const v of vehicles) {
+    const lat = v.latitude, lng = v.longitude;
+    if (lat == null || lng == null || (lat === 0 && lng === 0)) continue;
+    const color = v.simulated ? '#f0b429' : '#3ecf8e';
+    const mk = L.circleMarker([lat, lng], {
+      radius: v.id === state.vehicleId ? 9 : 6,
+      color: '#fff', weight: v.id === state.vehicleId ? 2 : 1,
+      fillColor: color, fillOpacity: v.online ? .95 : .4,
+    });
+    const owner = v.owner ? v.owner.name : '—';
+    mk.bindTooltip(`${esc(v.plate)} · ${esc(owner)}`, { direction: 'top' });
+    mk.bindPopup(
+      `<b>${esc(v.plate)}</b><br>${esc(v.brand)} ${esc(v.model)}<br>` +
+      `dono: ${esc(owner)}<br>${v.speed ?? 0} km/h · ${v.online ? 'online' : 'offline'}` +
+      `<br><span style="color:${color}">${v.simulated ? 'simulador' : 'teste real'}</span>`
+    );
+    mk.on('click', () => {
+      const sel = $('vehicle');
+      if (sel && [...sel.options].some((o) => Number(o.value) === v.id)) {
+        sel.value = String(v.id);
+      }
+      selectVehicle(v.id);
+    });
+    mk.addTo(fleetLayer);
+    fleetByVehicle[v.id] = mk;
+  }
+}
 
 function updatePhoneMarker() {
   const info = (state.vehiclesById || {})[state.vehicleId];
@@ -593,6 +636,18 @@ function setHud(plate, speed, lat, lng, battery, blocked) {
   $('hudLng').textContent = lng ?? '—';
   $('hudBat').textContent = battery ?? '—';
   $('hudBlocked').innerHTML = blocked ? '<span style="color:var(--err)">· BLOQUEADO</span>' : '';
+}
+
+// Mostra o dono do veículo selecionado (visão do administrador).
+function setHudOwner(name) {
+  const el = $('hudOwner');
+  if (!el) return;
+  if (name) {
+    el.hidden = false;
+    $('hudOwnerName').textContent = name;
+  } else {
+    el.hidden = true;
+  }
 }
 
 function moveMarker(lat, lng, animate) {
@@ -695,7 +750,7 @@ async function startTelemetryStream(vehicleId) {
   const ctrl = new AbortController();
   state.telStream = ctrl;
 
-  const latest = await api(`/v1/vehicles/${vehicleId}/telemetry/latest`);
+  const latest = await api(`/v1/admin/vehicles/${vehicleId}/telemetry/latest`);
   if (latest.ok && latest.data.latest) {
     const p = latest.data.latest;
     moveMarker(p.latitude, p.longitude, false);
@@ -706,7 +761,7 @@ async function startTelemetryStream(vehicleId) {
   (async () => {
     while (!ctrl.signal.aborted) {
       try {
-        await sse(`/v1/vehicles/${vehicleId}/telemetry/stream`, (event, payload) => {
+        await sse(`/v1/admin/vehicles/${vehicleId}/telemetry/stream`, (event, payload) => {
           if (event === 'presence' && payload.vehicle) {
             const v = payload.vehicle;
             setHud(v.plate, v.speed, v.latitude, v.longitude, state.vehicle?.battery, v.isBlocked);
@@ -729,22 +784,25 @@ async function startTelemetryStream(vehicleId) {
 // ── Sessão / veículos ────────────────────────────────────────────────────
 
 async function loadVehicles() {
-  const res = await api('/v1/vehicles');
+  // Visão do administrador: lista veículos de TODOS os usuários.
+  const res = await api('/v1/admin/vehicles');
   const list = res.ok ? (res.data.vehicles || []) : [];
   const sel = $('vehicle');
   sel.innerHTML = '';
   if (!list.length) {
     setHud(null, null, null, null, null, false);
+    setHudOwner(null);
     $('hudPlate').textContent = 'sem veículos';
     return;
   }
   sel.hidden = false;
   state.vehiclesById = {};
   for (const v of list) {
-    state.vehiclesById[v.id] = { userId: v.userId, plate: v.plate };
+    state.vehiclesById[v.id] = { userId: v.userId, plate: v.plate, ownerName: v.owner?.name };
     const opt = document.createElement('option');
     opt.value = v.id;
-    opt.textContent = `${v.plate} — ${v.brand} ${v.model}`;
+    const owner = v.owner?.name ? ` · ${v.owner.name}` : '';
+    opt.textContent = `${v.plate} — ${v.brand} ${v.model}${owner}`;
     sel.appendChild(opt);
   }
   sel.onchange = () => selectVehicle(Number(sel.value));
@@ -754,12 +812,19 @@ async function loadVehicles() {
 async function selectVehicle(id) {
   state.vehicleId = id;
   centered = false;
-  const res = await api(`/v1/vehicles/${id}`);
+  const res = await api(`/v1/admin/vehicles/${id}`);
   if (res.ok) {
     const v = res.data.vehicle;
     setHud(v.plate, v.speed, v.latitude, v.longitude, null, v.isBlocked);
+    setHudOwner(res.data.owner?.name || null);
     if (v.latitude && v.longitude) { moveMarker(v.latitude, v.longitude, true); }
-    if (v.userId != null) { state.vehiclesById[id] = { userId: v.userId, plate: v.plate }; }
+    if (v.userId != null) { state.vehiclesById[id] = { userId: v.userId, plate: v.plate, ownerName: res.data.owner?.name }; }
+  }
+  // Re-tinge o marcador da frota para destacar o veículo selecionado.
+  for (const [vid, mk] of Object.entries(fleetByVehicle)) {
+    const on = Number(vid) === id;
+    mk.setStyle({ radius: on ? 9 : 6, weight: on ? 2 : 1 });
+    if (on) mk.bringToFront();
   }
   updatePhoneMarker();
   await startTelemetryStream(id);
@@ -813,6 +878,8 @@ $('btnLogout').addEventListener('click', async () => {
   $('realTest').innerHTML = '<div class="empty-state">—</div>';
   setChip($('chipReal'), '', '—');
   $('mapPhoneLegend').hidden = true;
+  fleetLayer.clearLayers();
+  fleetByVehicle = {};
   if (phoneMarker._map) phoneMarker.remove();
 });
 

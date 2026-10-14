@@ -10,6 +10,7 @@ import commandsRoutes from './routes/commands.routes.js';
 import routesRoutes from './routes/routes.routes.js';
 import hardwareRoutes from './routes/hardware.routes.js';
 import mobileRoutes from './routes/mobile.routes.js';
+import adminRoutes from './routes/admin.routes.js';
 import { syncOnce } from './services/firebase-sync.service.js';
 import { getFirebase, getFirebaseInitError } from './firebase/firebase-admin.js';
 import { recordRequest, listLogs, subscribeLogs, logStats } from './services/log-buffer.service.js';
@@ -96,6 +97,11 @@ export function createApp() {
           'POST /v1/admin/sync',
           'GET /v1/admin/sync-status',
           'GET /v1/admin/overview',
+          'GET /v1/admin/vehicles',
+          'GET /v1/admin/vehicles/:id',
+          'GET /v1/admin/vehicles/:id/telemetry/latest',
+          'GET /v1/admin/vehicles/:id/telemetry/history',
+          'GET /v1/admin/vehicles/:id/telemetry/stream',
           'GET /v1/admin/logs',
           'GET /v1/admin/logs/stream',
         ],
@@ -113,6 +119,8 @@ export function createApp() {
   app.use('/v1', routesRoutes);
   app.use('/v1/hardware', hardwareRoutes);
   app.use('/v1/mobile', mobileRoutes);
+  // Visão do administrador: qualquer veículo de qualquer usuário (painel web).
+  app.use('/v1/admin', adminRoutes);
 
   // Força uma rodada de sincronização SQLite -> Firebase manualmente.
   // Com ?full=1 (ou {"full":true}) zera as marcas d'água e reenvia tudo.

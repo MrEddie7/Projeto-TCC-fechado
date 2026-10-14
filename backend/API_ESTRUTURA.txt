@@ -290,6 +290,35 @@
  GET /v1/admin/sync-status  🔒
    resp 200: { enabled, intervalMs, lastRun }
 
+ ── Admin / frota (visão do administrador) ─────────────────────────────────
+ Estas rotas dão ao PAINEL WEB acesso a QUALQUER veículo, de QUALQUER usuário
+ (o app continua usando /v1/vehicles, restrito ao próprio dono). Todas exigem
+ Authorization: Bearer (como o restante de /v1/admin).
+
+ GET /v1/admin/vehicles  🔒
+   resp 200: { vehicles:[ serializedVehicle + { owner:{id,name,email,phone} } ] }
+   Lista TODOS os veículos cadastrados por todos os usuários, com o dono.
+   É o que popula o seletor e os marcadores do mapa no painel.
+
+ GET /v1/admin/vehicles/:id  🔒
+   resp 200: { vehicle:{...owner}, device:{...}|null, owner:{...} }
+   404 se o veículo não existe.
+
+ GET /v1/admin/vehicles/:id/telemetry/latest  🔒
+   resp 200: { latest:{...}|null, vehicle:{...}, owner:{...} }
+
+ GET /v1/admin/vehicles/:id/telemetry/history?limit=&after=  🔒
+   resp 200: { points:[...] }
+
+ GET /v1/admin/vehicles/:id/telemetry/stream  🔒  (SSE)
+   Mesmos eventos do stream do app (`telemetry`, `blocked`, `command`, `presence`).
+
+ GET /v1/admin/overview  🔒
+   resp 200: { service, counts, sync, users:[...], vehicles:[ flattened + owner ],
+               screens:[...] }
+   O array `vehicles` é a frota inteira achatada (todos os usuários), com o
+   dono embutido — usado pelo mapa para desenhar a frota completa.
+
 
 ================================================================================
  7. ENDPOINTS DO HARDWARE (PROTOCOLO DO FIRMWARE)
@@ -557,5 +586,12 @@
    O overview (/v1/admin/overview) expoe: counts.simulatedVehicles,
    counts.realVehicles, counts.simulatedDevices, counts.realDevices e, por
    usuario, vehicles[].simulated, devices[].simulated e user.realTest.
+   Expoe tambem `vehicles` (frota inteira achatada, com `owner`) e, por isso,
+   o painel exibe no mapa TODOS os veiculos de TODOS os usuarios.
+
+   Visao do administrador x visao do app:
+     - O app (ApiClient) usa /v1/vehicles*, restrito ao veiculo do proprio dono.
+     - O painel web usa /v1/admin/vehicles*, que enxerga qualquer veiculo de
+       qualquer usuario (a frota inteira), com o dono identificado.
 
 ================================================================================

@@ -99,6 +99,15 @@ class SyncManager(
     }
 
     /**
+     * Envia ao backend os veículos que existem apenas localmente, para que
+     * apareçam também no painel do administrador.
+     */
+    suspend fun pushLocalVehiclesToBackend(userId: Long): Result<Int> {
+        return backendRepository?.pushLocalVehiclesToBackend(userId)
+            ?: Result.failure(IllegalStateException("BackendRepository não configurado"))
+    }
+
+    /**
      * Envia comando para o backend (que o hardware vai buscar via polling).
      */
     suspend fun sendCommandToBackend(vehicleId: Long, command: String, note: String? = null): Result<ApiClient.CommandDto> {

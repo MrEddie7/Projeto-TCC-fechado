@@ -24,6 +24,7 @@ data class VehicleListState(
 class VehicleViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = (application as App).vehicleRepository
+    private val backend = (application as App).backendRepository
     private val prefs = application.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
     private val userId: Long get() = prefs.getLong(Constants.KEY_USER_ID, -1)
 
@@ -36,6 +37,15 @@ class VehicleViewModel(application: Application) : AndroidViewModel(application)
     val vehicles: StateFlow<List<Vehicle>> = repository.getVehiclesByUser(userId)
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
+    init {
+        // Ao abrir a lista de veículos, garante que veículos cadastrados apenas
+        // localmente também sejam enviados ao backend e apareçam no painel do
+        // administrador (best-effort; sem backend configurado, não faz nada).
+        if (backend.isConfigured && userId > 0) {
+            viewModelScope.launch { backend.pushLocalVehiclesToBackend(userId) }
+        }
+    }
+
     fun registerVehicle(plate: String, model: String, brand: String, year: String, color: String) {
         if (plate.isBlank() || model.isBlank() || brand.isBlank()) {
             _registerState.value = _registerState.value.copy(error = "Preencha os campos obrigatórios (placa, modelo, marca)")
@@ -44,20 +54,42 @@ class VehicleViewModel(application: Application) : AndroidViewModel(application)
 
         viewModelScope.launch {
             _registerState.value = _registerState.value.copy(isLoading = true, error = null)
-            try {
-                val vehicle = Vehicle(
-                    userId = userId,
-                    plate = plate.trim().uppercase(),
-                    model = model.trim(),
-                    brand = brand.trim(),
-                    year = year.toIntOrNull() ?: 0,
-                    color = color.trim()
-                )
-                repository.registerVehicle(vehicle)
-                _registerState.value = VehicleRegisterState(isRegistered = true)
-            } catch (e: Exception) {
-                _registerState.value = VehicleRegisterState(error = e.message ?: "Erro ao cadastrar veículo")
+            val plateStr = plate.trim().uppercase()
+            val modelStr = model.trim()
+            val brandStr = brand.trim()
+            val colorStr = color.trim()
+            val yearInt = year.toIntOrNull() ?: 0
+
+            // Com o backend (API Node) configurado, cadastra o veículo na API —
+            // que é a fonte da verdade — para que ele apareça também no painel
+            // do administrador. O BackendRepository salva o veículo retornado
+            // (com o id do servidor) no Room. Sem backend, mantém o cadastro
+            // apenas local (modo offline).
+            val result: Result<Unit> = if (backend.isConfigured) {
+                backend.createVehicle(plateStr, modelStr, brandStr, yearInt, colorStr).map { }
+            } else {
+                runCatching {
+                    repository.registerVehicle(
+                        Vehicle(
+                            userId = userId,
+                            plate = plateStr,
+                            model = modelStr,
+                            brand = brandStr,
+                            year = yearInt,
+                            color = colorStr
+                        )
+                    )
+                }.map { }
             }
+
+            result.fold(
+                onSuccess = {
+                    _registerState.value = VehicleRegisterState(isRegistered = true)
+                },
+                onFailure = { e ->
+                    _registerState.value = VehicleRegisterState(error = e.message ?: "Erro ao cadastrar veículo")
+                }
+            )
         }
     }
 

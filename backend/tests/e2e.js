@@ -229,6 +229,47 @@ console.log('== 10. Localização do celular (/v1/mobile) ==');
   ok('lê última localização do celular', latest.json.location?.latitude === -23.561);
 }
 
+console.log('== 11. Visão do administrador (frota de todos os usuários) ==');
+{
+  ok('admin/vehicles exige token', (await api('GET', '/v1/admin/vehicles')).status === 401);
+
+  // Segundo usuário cadastra um veículo próprio.
+  const reg = await api('POST', '/v1/auth/register', {
+    body: { name: 'Outro Motorista', email: 'outro@tcc.com', password: 'veiculotracker123' },
+  });
+  const outroToken = reg.json.token;
+  const created = await api('POST', '/v1/vehicles', {
+    token: outroToken,
+    body: { plate: 'XYZ9Z99', model: 'Civic', brand: 'Honda', year: 2021, color: 'Prata' },
+  });
+  ok('segundo usuário cadastra veículo', created.status === 201, JSON.stringify(created.json));
+  const outroVid = created.json.vehicle.id;
+
+  // O veículo do outro usuário NÃO aparece na lista do app do primeiro usuário.
+  const meu = await api('GET', '/v1/vehicles', { token });
+  ok('app lista só os veículos do próprio usuário', !(meu.json.vehicles || []).some((v) => v.id === outroVid));
+
+  // Mas APARECE na visão do administrador, com o dono identificado.
+  const all = await api('GET', '/v1/admin/vehicles', { token });
+  const seen = (all.json.vehicles || []).find((v) => v.id === outroVid);
+  ok('admin vê veículo de outro usuário', !!seen && all.status === 200);
+  ok('admin vê o dono do veículo', seen?.owner?.email === 'outro@tcc.com');
+
+  // Acesso administrativo ao detalhe e à telemetria de qualquer veículo.
+  const detail = await api('GET', `/v1/admin/vehicles/${outroVid}`, { token });
+  ok('admin abre detalhe de veículo de outro usuário', detail.json.vehicle?.plate === 'XYZ9Z99');
+  const tel = await api('GET', `/v1/admin/vehicles/${outroVid}/telemetry/latest`, { token });
+  ok('admin lê telemetria de veículo de outro usuário', tel.status === 200);
+
+  // A rota do app continua restrita ao dono (404 para o administrador logado).
+  ok('rota do app continua restrita ao dono', (await api('GET', `/v1/vehicles/${outroVid}`, { token })).status === 404);
+
+  // O overview (painel) também expõe a frota achatada com dono.
+  const ov = await api('GET', '/v1/admin/overview', { token });
+  const flat = (ov.json.vehicles || []).find((v) => v.id === outroVid);
+  ok('overview traz frota achatada com dono', flat?.owner?.email === 'outro@tcc.com');
+}
+
 console.log('');
 console.log(`Resultado: ${passed} passou, ${failed} falhou`);
 db.close();

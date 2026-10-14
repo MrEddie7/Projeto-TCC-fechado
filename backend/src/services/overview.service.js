@@ -278,11 +278,23 @@ function screensHealth(c) {
 
 export function buildOverview() {
   const c = counts();
+  const users = usersWithVehicles();
+
+  // Lista achatada de TODOS os veículos, com o dono embutido. É o que o mapa
+  // do administrador usa para exibir a frota inteira (de todos os usuários).
+  const vehicles = [];
+  for (const u of users) {
+    for (const v of u.vehicles) {
+      vehicles.push({ ...v, owner: { id: u.id, name: u.name, email: u.email } });
+    }
+  }
+
   return {
     service: serviceInfo(),
     counts: c,
     sync: syncInfo(),
-    users: usersWithVehicles(),
+    users,
+    vehicles,
     screens: screensHealth(c),
   };
 }

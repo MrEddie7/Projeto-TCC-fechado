@@ -10,7 +10,7 @@ router.use(requireAuth);
 
 const PLATE_REGEX = /^[A-Z]{3}\d[A-Z0-9]\d{2}$|^[A-Z]{3}-\d{4}$/;
 
-function serializeVehicle(row) {
+export function serializeVehicle(row) {
   return {
     id: Number(row.id),
     userId: Number(row.user_id),
@@ -29,7 +29,7 @@ function serializeVehicle(row) {
   };
 }
 
-function serializeDevice(row) {
+export function serializeDevice(row) {
   if (!row) return null;
   return {
     id: Number(row.id),
