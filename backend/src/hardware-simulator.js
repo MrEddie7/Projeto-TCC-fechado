@@ -9,6 +9,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { config } from './config.js';
+import { createRouteState, advanceOnRoute, getRoute, randomRouteIndex } from './util/road-routes.js';
 
 const args = process.argv.slice(2);
 function argValue(name, def) {
@@ -36,33 +37,46 @@ if (!DEVICE_ID || !API_KEY) {
 // nasceriam empilhados no mesmo ponto e as rotas se sobreporiam no mapa.
 let lat = config.simulatorStartLat;
 let lng = config.simulatorStartLng;
-let heading = 45; // graus (nordeste)
+let heading = 0;
 let speed = 0;
 let step = 0;
 // Estado do relê de corte de ignição. Quando bloqueado, o veículo para de
 // andar (mas continua reportando telemetria, como um rastreador real).
 let blocked = false;
 
+// Rota viária que este simulador vai percorrer. Determinada no boot a partir
+// dos últimos caracteres do DEVICE_ID para distribuir dispositivos pelas vias.
+const routeIndex = randomRouteIndex();
+let routeState = createRouteState(lat, lng, routeIndex);
+
 function moveVehicle() {
-  // Acelera até ~40 km/h, faz curvas suaves e reduz em "paradas" periódicas.
+  // Percorre a via real usando waypoints GPS de road-routes.js.
+  // Aceleração/desaceleração e paradas semafóricas periódicas.
   step++;
+  const route = getRoute(routeIndex);
+  const nominalSpeed = route.speedKmh;
   const cycle = step % 60;
+
   if (cycle < 4) {
-    speed = 0; // parada no semáforo
-  } else if (speed < 40) {
-    speed = Math.min(speed + 3, 40);
-    heading = (heading + 5) % 360;
-  } else if (cycle > 50) {
-    speed = Math.max(speed - 6, 0);
+    speed = 0; // semáforo vermelho
+  } else if (speed < nominalSpeed) {
+    speed = Math.min(speed + 5, nominalSpeed); // aceleração
+  } else if (cycle > 52) {
+    speed = Math.max(speed - 4, 0); // frenagem suave
   } else {
-    heading = (heading + 1.2) % 360;
+    // Cruzeiro com variação de tráfego ±3 km/h
+    const jitter = Math.sin(step * 0.37) * 3;
+    speed = Math.max(5, Math.min(nominalSpeed + jitter, nominalSpeed * 1.15));
   }
-  const ms = speed / 3.6; // m/s
+
+  if (speed < 0.5) return; // parado: mantém posição na via
+
   const dt = INTERVAL_MS / 1000;
-  const kmPerDegLat = 111320;
-  const kmPerDegLng = 111320 * Math.cos((lat * Math.PI) / 180);
-  lat += (ms * dt * Math.cos((heading * Math.PI) / 180)) / kmPerDegLat;
-  lng += (ms * dt * Math.sin((heading * Math.PI) / 180)) / kmPerDegLng;
+  const distM = (speed / 3.6) * dt;
+  const pos = advanceOnRoute(routeState, distM, speed);
+  lat = pos.lat;
+  lng = pos.lng;
+  heading = pos.heading;
 }
 
 async function request(method, path, body) {
@@ -135,10 +149,14 @@ async function boot() {
     `[sim] dispositivo registrado. Veículo: ${json.vehicle?.plate || 'sem vínculo'} | pendentes: ${json.pendingCommands}`
   );
   // Retoma de onde o veículo parou, para não teleportar nem empilhar a frota.
+  // Re-ancora o routeState ao waypoint mais próximo da posição atual.
   if (json.vehicle && json.vehicle.latitude && json.vehicle.longitude) {
     lat = Number(json.vehicle.latitude);
     lng = Number(json.vehicle.longitude);
-    console.log(`[sim] retomando da posição atual: ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+    routeState = createRouteState(lat, lng, routeIndex);
+    console.log(`[sim] retomando da posição atual: ${lat.toFixed(6)}, ${lng.toFixed(6)} | rota: ${getRoute(routeIndex).name}`);
+  } else {
+    console.log(`[sim] iniciando na posição padrão | rota: ${getRoute(routeIndex).name}`);
   }
   // Sincroniza o estado do relê com o que o backend já registrou.
   if (json.vehicle && json.vehicle.isBlocked) {

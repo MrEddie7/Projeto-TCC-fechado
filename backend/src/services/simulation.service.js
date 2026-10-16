@@ -8,6 +8,9 @@
 // Como distinguir as duas origens? O device criado aqui usa
 // `model = 'server-sim'`. O api.sh ignora esses devices (não sobe um
 // hardware-simulator para eles), evitando telemetria duplicada.
+//
+// Movimentação: veículos percorrem rotas viárias reais de São Paulo
+// (road-routes.js), seguindo os waypoints GPS de cada via em loop.
 // ─────────────────────────────────────────────────────────────────────────
 import { randomBytes } from 'node:crypto';
 import { db } from '../db/database.js';
@@ -15,11 +18,17 @@ import { config } from '../config.js';
 import { HttpError } from '../util/http-error.js';
 import { ingestTelemetry } from './telemetry.service.js';
 import { acknowledgeCommand, getPendingCommandsForDevice } from './command.service.js';
+import {
+  createRouteState,
+  advanceOnRoute,
+  randomRouteIndex,
+  getRoute,
+} from '../util/road-routes.js';
 
 export const SERVER_SIM_MODEL = 'server-sim';
 
 // Estado do movimento de cada veículo simulado (mantido em memória).
-// Chave: vehicleId.
+// Chave: vehicleId → { routeState, speed, step }
 const moveState = new Map();
 
 function deviceOf(vehicleId) {
@@ -130,42 +139,67 @@ export function applySimulationDecision(vehicle, simulate) {
 
 // ── Loop de movimentação ────────────────────────────────────────────────
 
+// Distribui veículos pelas rotas usando o id do veículo como semente,
+// assim cada veículo sempre começa na mesma rota após reinício.
+function routeIndexFor(vehicleId) {
+  return Number(vehicleId) % 8; // 8 rotas disponíveis
+}
+
 function stateFor(vehicle) {
   const id = Number(vehicle.id);
   let s = moveState.get(id);
   if (!s) {
+    const lat = Number(vehicle.latitude) || config.simulatorStartLat;
+    const lng = Number(vehicle.longitude) || config.simulatorStartLng;
+    const routeIndex = routeIndexFor(id);
+    const route = getRoute(routeIndex);
+    const nominalSpeed = route.speedKmh;
     s = {
-      lat: Number(vehicle.latitude) || config.simulatorStartLat,
-      lng: Number(vehicle.longitude) || config.simulatorStartLng,
-      heading: 45,
-      speed: 0,
+      routeState: createRouteState(lat, lng, routeIndex),
+      // Velocidade inicial: 60–100% da nominal para espalhar os veículos na rota.
+      speed: nominalSpeed * (0.6 + (id % 5) * 0.08),
       step: 0,
+      // lat/lng e heading são calculados a cada tick pelo advanceOnRoute.
+      lat,
+      lng,
+      heading: 0,
     };
     moveState.set(id, s);
   }
   return s;
 }
 
-// Mesma dinâmica do hardware-simulator.js: acelera até ~40 km/h, faz curvas
-// suaves e reduz em paradas periódicas.
+// Avança o veículo ao longo da via real, simulando aceleração/desaceleração
+// e paradas semafóricas sem sair da estrada.
 function advance(s, dtSec) {
   s.step++;
+  const route = getRoute(s.routeState.routeIndex);
+  const nominalSpeed = route.speedKmh;
+
+  // Ciclo de 60 ticks: ~4 ticks parado (semáforo), aceleração gradual, cruzeiro
+  // com pequenas variações de velocidade (tráfego), frenagem antes do próximo ciclo.
   const cycle = s.step % 60;
   if (cycle < 4) {
-    s.speed = 0;
-  } else if (s.speed < 40) {
-    s.speed = Math.min(s.speed + 3, 40);
-    s.heading = (s.heading + 5) % 360;
-  } else if (cycle > 50) {
-    s.speed = Math.max(s.speed - 6, 0);
+    s.speed = 0; // semáforo vermelho
+  } else if (s.speed < nominalSpeed) {
+    // Aceleração: +5 km/h por tick até a velocidade nominal da via
+    s.speed = Math.min(s.speed + 5, nominalSpeed);
+  } else if (cycle > 52) {
+    // Desaceleração suave antes da parada
+    s.speed = Math.max(s.speed - 4, 0);
   } else {
-    s.heading = (s.heading + 1.2) % 360;
+    // Cruzeiro: variação ±3 km/h para simular tráfego (carro da frente etc.)
+    const jitter = (Math.sin(s.step * 0.37) * 3);
+    s.speed = Math.max(5, Math.min(nominalSpeed + jitter, nominalSpeed * 1.15));
   }
-  const ms = s.speed / 3.6;
-  const kmPerDegLat = 111320;
-  const kmPerDegLng = 111320 * Math.cos((s.lat * Math.PI) / 180);
-  s.lat += (ms * dtSec * Math.cos((s.heading * Math.PI) / 180)) / kmPerDegLat;
-  s.lng += (ms * dtSec * Math.sin((s.heading * Math.PI) / 180)) / kmPerDegLng;
+
+  if (s.speed < 0.5) return; // parado: não avança, mas mantém posição na via
+
+  const distM = (s.speed / 3.6) * dtSec;
+  const pos = advanceOnRoute(s.routeState, distM, s.speed);
+  s.lat = pos.lat;
+  s.lng = pos.lng;
+  s.heading = pos.heading;
 }
 
 // Sincroniza o controle remoto com o rastreador virtual: pega os comandos
@@ -235,7 +269,7 @@ export function simulationTick() {
         longitude: Number(s.lng.toFixed(6)),
         speed: Number(s.speed.toFixed(1)),
         heading: Number(s.heading.toFixed(1)),
-        battery: 12.6,
+        battery: parseFloat((12.0 + Math.random() * 0.8).toFixed(1)),
         timestamp: Date.now(),
       });
       moved++;
