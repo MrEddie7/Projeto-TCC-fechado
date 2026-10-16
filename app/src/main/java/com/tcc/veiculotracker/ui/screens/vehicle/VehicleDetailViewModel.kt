@@ -36,6 +36,7 @@ class VehicleDetailViewModel(
 }
 
 class VehicleDetailViewModelFactory(
+    private val application: Application,
     private val vehicleId: Long
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -43,13 +44,9 @@ class VehicleDetailViewModelFactory(
             @Suppress("UNCHECKED_CAST")
             return VehicleDetailViewModel(
                 vehicleId = vehicleId,
-                application = getApplication()
+                application = application
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
-    }
-
-    private fun getApplication(): Application {
-        return App()
     }
 }

@@ -33,13 +33,19 @@ const toFloat = (v, def) => {
 
 export const config = {
   port: toInt(process.env.PORT, 3000),
-  dbPath: path.resolve(__dirname, '..', process.env.DB_PATH || 'data/veiculotracker.db'),
-  jwtSecret: process.env.JWT_SECRET || 'veiculotracker-dev-secret',
+  dbPath: path.resolve(__dirname, '..', process.env.DB_PATH || 'data/securitas.db'),
+  jwtSecret: process.env.JWT_SECRET || 'securitas-dev-secret',
   maxTelemetryPoints: toInt(process.env.MAX_TELEMETRY_POINTS, 10000),
   simulatorIntervalMs: toInt(process.env.SIMULATOR_INTERVAL_MS, 5000),
   simulatorStartLat: toFloat(process.env.SIMULATOR_START_LAT, -23.5505),
   simulatorStartLng: toFloat(process.env.SIMULATOR_START_LNG, -46.6333),
   logRequests: (process.env.LOG_REQUESTS || 'true').toLowerCase() === 'true',
+
+  // ── Simulação de veículos pelo próprio backend ────────────────────────
+  // Veículos que o usuário adiciona à simulação (via app) são movidos pelo
+  // backend, sem precisar de um processo hardware-simulator por veículo.
+  simulationEnabled: (process.env.SIMULATION_ENABLED || 'true').toLowerCase() === 'true',
+  simulationIntervalMs: toInt(process.env.SIMULATION_INTERVAL_MS, 5000),
 
   // ── Sincronização SQLite -> Firebase ──────────────────────────────────
   firebaseSyncEnabled: (process.env.FIREBASE_SYNC_ENABLED || 'false').toLowerCase() === 'true',

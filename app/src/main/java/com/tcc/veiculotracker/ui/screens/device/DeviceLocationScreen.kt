@@ -1,5 +1,8 @@
 package com.tcc.veiculotracker.ui.screens.device
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -24,6 +27,27 @@ fun DeviceLocationScreen(
     viewModel: DeviceLocationViewModel = viewModel()
 ) {
     val state by viewModel.state.collectAsState()
+
+    // Pede a permissão de localização em tempo de execução (o manifesto só a
+    // declara). Sem isso o celular nunca envia a posição e não aparece como
+    // "conectado" no painel.
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        viewModel.checkPermission()
+        if (result.values.any { it }) {
+            viewModel.startTracking()
+        }
+    }
+
+    fun requestLocationPermission() {
+        permissionLauncher.launch(
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            )
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -71,8 +95,15 @@ fun DeviceLocationScreen(
                             "Permissão de localização concedida"
                         else
                             "Permissão de localização necessária",
-                        style = MaterialTheme.typography.bodyLarge
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.weight(1f)
                     )
+                    if (!state.hasPermission) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(onClick = { requestLocationPermission() }) {
+                            Text("Conceder")
+                        }
+                    }
                 }
             }
 
@@ -118,8 +149,13 @@ fun DeviceLocationScreen(
                     ) {
                         Button(
                             onClick = {
-                                if (state.isTracking) viewModel.stopTracking()
-                                else viewModel.startTracking()
+                                if (state.isTracking) {
+                                    viewModel.stopTracking()
+                                } else if (!state.hasPermission) {
+                                    requestLocationPermission()
+                                } else {
+                                    viewModel.startTracking()
+                                }
                             },
                             modifier = Modifier.weight(1f),
                             colors = ButtonDefaults.buttonColors(

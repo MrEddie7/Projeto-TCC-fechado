@@ -53,13 +53,13 @@ export function createApp() {
     next();
   });
 
-  app.get('/health', (_req, res) => res.json({ ok: true, service: 'veiculotracker-backend', time: Date.now() }));
+  app.get('/health', (_req, res) => res.json({ ok: true, service: 'securitas-backend', time: Date.now() }));
 
   // Índice da API: referência rápida dos endpoints em /api. A raiz (/) fica
   // reservada para a aplicação web do painel (public/index.html).
   app.get('/api', (_req, res) =>
     res.json({
-      service: 'veiculotracker-backend',
+      service: 'securitas-backend',
       description: 'API de ponte entre o hardware rastreador (GPS IoT) e o app Securitas',
       health: '/health',
       endpoints: {
@@ -71,6 +71,8 @@ export function createApp() {
           'PUT /v1/vehicles/:id',
           'DELETE /v1/vehicles/:id',
           'POST /v1/vehicles/:id/device',
+          'GET /v1/vehicles/:id/simulation',
+          'POST /v1/vehicles/:id/simulation',
         ],
         telemetry: [
           'GET /v1/vehicles/:id/telemetry/latest',

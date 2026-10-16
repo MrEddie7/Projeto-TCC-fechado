@@ -1,10 +1,10 @@
 ================================================================================
-                    VEICULOTRACKER (SECURITAS) - DOCUMENTAÇÃO DO PROJETO
+                    SECURITAS - DOCUMENTAÇÃO DO PROJETO
 ================================================================================
 
 1. VISÃO GERAL DO PROJETO
 --------------------------------------------------------------------------------
-O VeiculoTracker é um sistema móvel moderno e robusto voltado para rastreamento
+O Securitas é um sistema móvel moderno e robusto voltado para rastreamento
 veicular, telemetria em tempo real, segurança patrimonial (bloqueio remoto) e
 gestão de rotas históricas. O aplicativo foi desenvolvido nativamente para Android
 utilizando as tecnologias mais recentes do ecossistema Google (Kotlin, Jetpack Compose,
@@ -38,7 +38,7 @@ nuvem (Firebase Cloud Firestore e Realtime Database).
 --------------------------------------------------------------------------------
 A aplicação utiliza uma estratégia de dados em 3 camadas complementares:
 
-[1] SQLite Interno (Room Database Local - `veiculotracker_db`):
+[1] SQLite Interno (Room Database Local - `securitas_db`):
     - É a fonte imediata da verdade para a interface do usuário.
     - Garante inicialização instantânea e operação 100% offline.
     - Tabelas:

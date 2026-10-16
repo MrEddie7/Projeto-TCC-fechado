@@ -153,7 +153,15 @@ class BackendRepository(
         updates["brand"] = vehicle.brand
         updates["year"] = vehicle.year
         updates["color"] = vehicle.color
-        return apiClient.updateVehicle(vehicle.id, updates).map { dto ->
+        return updateVehicle(vehicle.id, updates)
+    }
+
+    /**
+     * Atualiza campos específicos de um veículo no backend e localmente.
+     * Usado, por exemplo, ao bloquear/desbloquear o veículo.
+     */
+    suspend fun updateVehicle(vehicleId: Long, updates: Map<String, Any>): Result<Vehicle> {
+        return apiClient.updateVehicle(vehicleId, updates).map { dto ->
             val updated = dto.toEntity()
             vehicleDao.update(updated)
             updated
@@ -168,6 +176,22 @@ class BackendRepository(
             vehicleDao.getVehicleById(vehicleId).first()?.let { vehicleDao.delete(it) }
             ok
         }
+    }
+
+    // ── Simulação do veículo ──────────────────────────────────────────────
+
+    /**
+     * Pergunta ao backend se o veículo deve entrar na frota simulada.
+     */
+    suspend fun getSimulationDecision(vehicleId: Long): Result<ApiClient.SimulationDecisionDto> {
+        return apiClient.getSimulationDecision(vehicleId)
+    }
+
+    /**
+     * Informa ao backend a escolha do usuário sobre a simulação.
+     */
+    suspend fun setVehicleSimulation(vehicleId: Long, simulate: Boolean): Result<ApiClient.SimulationDecisionDto> {
+        return apiClient.setVehicleSimulation(vehicleId, simulate)
     }
 
     // ── Comandos (bloqueio/desbloqueio) ────────────────────────────────────

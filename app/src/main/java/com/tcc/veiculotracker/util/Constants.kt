@@ -1,7 +1,7 @@
 package com.tcc.veiculotracker.util
 
 object Constants {
-    const val PREFS_NAME = "veiculotracker_prefs"
+    const val PREFS_NAME = "securitas_prefs"
     const val KEY_USER_ID = "user_id"
     const val KEY_LOGGED_IN = "logged_in"
     const val KEY_USER_NAME = "user_name"

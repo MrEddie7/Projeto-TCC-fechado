@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { initializeApp, applicationDefault, getApps, deleteApp } from 'firebase-admin/app';
+import { initializeApp, applicationDefault, cert, getApps, deleteApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getDatabase } from 'firebase-admin/database';
 import { config } from '../config.js';
@@ -35,7 +35,8 @@ export function getFirebase() {
 
       let credential;
       if (config.firebaseServiceAccount && fs.existsSync(config.firebaseServiceAccount)) {
-        credential = JSON.parse(fs.readFileSync(config.firebaseServiceAccount, 'utf8'));
+        // firebase-admin v13+ exige um objeto Credential (cert()), não o JSON cru.
+        credential = cert(JSON.parse(fs.readFileSync(config.firebaseServiceAccount, 'utf8')));
       } else {
         // Fallback: credenciais padrão do ambiente (GOOGLE_APPLICATION_CREDENTIALS)
         credential = applicationDefault();

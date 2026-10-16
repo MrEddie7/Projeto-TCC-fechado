@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────
-# VEICULOTRACKER - controle da API
+# SECURITAS - controle da API
 #
 # Sobe/derruba a API e o simulador de hardware juntos, com PID e log
 # por processo. Pensado para uso diário durante o desenvolvimento.
@@ -143,11 +143,11 @@ start() {
   local limit="${SIM_FLEET:-0}" rows
   rows="$(cd "$DIR" && node -e "
     const { DatabaseSync } = require('node:sqlite');
-    const db = new DatabaseSync('./data/veiculotracker.db', { readOnly: true });
+    const db = new DatabaseSync('./data/securitas.db', { readOnly: true });
     const limit = ${limit:-0};
     const sql = \`SELECT d.device_id, d.api_key, v.plate
                  FROM devices d JOIN vehicles v ON v.id = d.vehicle_id
-                 WHERE d.vehicle_id IS NOT NULL
+                 WHERE d.vehicle_id IS NOT NULL AND d.model <> 'server-sim'
                  ORDER BY d.id\` + (limit > 0 ? ' LIMIT ' + limit : '');
     for (const r of db.prepare(sql).all()) {
       console.log([r.device_id, r.api_key, r.plate].join('\t'));

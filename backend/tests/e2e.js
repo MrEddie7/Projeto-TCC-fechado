@@ -54,11 +54,11 @@ let devKey;
 console.log('== 1. Autenticação ==');
 {
   let r = await api('POST', '/v1/auth/register', {
-    body: { name: 'Aluno TCC', email: 'aluno@tcc.com', password: 'veiculotracker123' },
+    body: { name: 'Aluno TCC', email: 'aluno@tcc.com', password: 'securitas123' },
   });
   if (r.status === 409) {
     r = await api('POST', '/v1/auth/login', {
-      body: { email: 'aluno@tcc.com', password: 'veiculotracker123' },
+      body: { email: 'aluno@tcc.com', password: 'securitas123' },
     });
   }
   ok('register/login retorna token', !!r.json.token && r.status === 200 || r.status === 201);
@@ -235,7 +235,7 @@ console.log('== 11. Visão do administrador (frota de todos os usuários) ==');
 
   // Segundo usuário cadastra um veículo próprio.
   const reg = await api('POST', '/v1/auth/register', {
-    body: { name: 'Outro Motorista', email: 'outro@tcc.com', password: 'veiculotracker123' },
+    body: { name: 'Outro Motorista', email: 'outro@tcc.com', password: 'securitas123' },
   });
   const outroToken = reg.json.token;
   const created = await api('POST', '/v1/vehicles', {

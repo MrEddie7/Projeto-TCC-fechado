@@ -45,21 +45,25 @@ fun LoginScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Text(
-                    text = "Securitas",
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Icon(Icons.Default.Bolt, null, Modifier.padding(16.dp).size(34.dp), MaterialTheme.colorScheme.primary)
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(text = "Securitas", style = MaterialTheme.typography.headlineLarge)
 
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "Rastreamento de Veículos",
+                    text = "Gerencie e proteja seu veículo em tempo real com facilidade.",
                     style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
                 )
 
-                Spacer(modifier = Modifier.height(48.dp))
+                Spacer(modifier = Modifier.height(40.dp))
 
                 state.error?.let { error ->
                     Card(
@@ -83,7 +87,8 @@ fun LoginScreen(
                     onValueChange = viewModel::updateEmail,
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !state.isLoading,
-                    label = { Text("Email") },
+                    label = { Text("E-mail") },
+                    leadingIcon = { Icon(Icons.Default.Email, null) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
                 )
@@ -96,6 +101,7 @@ fun LoginScreen(
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !state.isLoading,
                     label = { Text("Senha") },
+                    leadingIcon = { Icon(Icons.Default.Lock, null) },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
@@ -109,7 +115,7 @@ fun LoginScreen(
                     enabled = !state.isLoading,
                     shape = MaterialTheme.shapes.medium
                 ) {
-                    Text("Entrar", style = MaterialTheme.typography.labelLarge)
+                    Text("Entrar  →", style = MaterialTheme.typography.labelLarge)
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
@@ -130,7 +136,7 @@ fun LoginScreen(
                         tint = MaterialTheme.colorScheme.primary
                     )
                     Spacer(modifier = Modifier.width(12.dp))
-                    Text("Entrar com Google", style = MaterialTheme.typography.labelLarge)
+                    Text("Continuar com Google", style = MaterialTheme.typography.labelLarge)
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))

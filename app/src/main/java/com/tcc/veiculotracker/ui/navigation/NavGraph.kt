@@ -22,6 +22,7 @@ import com.tcc.veiculotracker.ui.screens.register.RegisterScreen
 import com.tcc.veiculotracker.ui.screens.remote.RemoteControlScreen
 import com.tcc.veiculotracker.ui.screens.settings.SettingsScreen
 import com.tcc.veiculotracker.ui.screens.tracking.TrackingScreen
+import com.tcc.veiculotracker.ui.screens.vehicle.VehicleDetailScreen
 import com.tcc.veiculotracker.ui.screens.vehicle.VehicleRegisterScreen
 
 @Composable
@@ -149,6 +150,17 @@ fun NavGraph(startDestination: String = Screen.Login.route) {
 
             composable(Screen.DeviceLocation.route) {
                 DeviceLocationScreen()
+            }
+
+            composable(
+                route = Screen.VehicleDetail.route,
+                arguments = listOf(navArgument("vehicleId") { type = NavType.LongType })
+            ) { backStackEntry ->
+                val vehicleId = backStackEntry.arguments?.getLong("vehicleId") ?: 0L
+                VehicleDetailScreen(
+                    vehicleId = vehicleId,
+                    onNavigateBack = { navController.popBackStack() }
+                )
             }
         }
     }

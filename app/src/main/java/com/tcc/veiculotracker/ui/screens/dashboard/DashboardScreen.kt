@@ -29,7 +29,23 @@ fun DashboardScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Dashboard") },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            shape = MaterialTheme.shapes.small,
+                            color = MaterialTheme.colorScheme.primary
+                        ) {
+                            Icon(
+                                Icons.Default.Bolt,
+                                contentDescription = null,
+                                modifier = Modifier.padding(7.dp).size(18.dp),
+                                tint = MaterialTheme.colorScheme.onPrimary
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Text("Securitas", style = MaterialTheme.typography.titleMedium)
+                    }
+                },
                 actions = {
                     IconButton(onClick = onNavigateToDeviceLocation) {
                         Icon(Icons.Default.MyLocation, contentDescription = "Localização do Celular")
@@ -55,14 +71,10 @@ fun DashboardScreen(
             contentPadding = PaddingValues(vertical = 16.dp)
         ) {
             item {
-                Text(
-                    text = "Olá, ${state.userName}!",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold
-                )
+                Text("Olá, ${state.userName}!", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Resumo dos seus veículos",
+                    text = "Sua moto está segura agora.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                 )
@@ -75,21 +87,21 @@ fun DashboardScreen(
                 ) {
                     StatCard(
                         modifier = Modifier.weight(1f),
-                        title = "Total",
+                        title = "Veículos",
                         value = state.totalVehicles.toString(),
                         icon = Icons.Default.DirectionsCar,
                         color = MaterialTheme.colorScheme.primary
                     )
                     StatCard(
                         modifier = Modifier.weight(1f),
-                        title = "Ativos",
+                        title = "Protegidos",
                         value = state.activeVehicles.toString(),
                         icon = Icons.Default.CheckCircle,
                         color = MaterialTheme.colorScheme.tertiary
                     )
                     StatCard(
                         modifier = Modifier.weight(1f),
-                        title = "Bloqueados",
+                        title = "Alertas",
                         value = state.blockedVehicles.toString(),
                         icon = Icons.Default.Block,
                         color = MaterialTheme.colorScheme.error
@@ -105,13 +117,13 @@ fun DashboardScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Meus Veículos",
+                        text = "Meus veículos",
                         style = MaterialTheme.typography.titleLarge
                     )
                     TextButton(onClick = onNavigateToRemoteControl) {
                         Icon(Icons.Default.SettingsRemote, contentDescription = null)
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Controle Remoto")
+                        Text("Ver controles")
                     }
                 }
             }
@@ -119,7 +131,8 @@ fun DashboardScreen(
             if (state.vehicles.isEmpty()) {
                 item {
                     Card(
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                     ) {
                         Column(
                             modifier = Modifier
@@ -135,12 +148,12 @@ fun DashboardScreen(
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                "Nenhum veículo cadastrado",
+                                "Nenhum veículo cadastrado ainda",
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                             )
                             Text(
-                                "Toque no + para cadastrar",
+                                "Toque em + para adicionar seu primeiro veículo",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
                             )
@@ -169,7 +182,7 @@ fun StatCard(
 ) {
     Card(
         modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.1f))
+        colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.14f))
     ) {
         Column(
             modifier = Modifier.padding(12.dp),

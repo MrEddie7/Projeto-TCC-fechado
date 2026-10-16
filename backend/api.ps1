@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    VEICULOTRACKER - controle da API (versao Windows).
+    SECURITAS - controle da API (versao Windows).
 
 .DESCRIPTION
     Equivalente ao api.sh do Linux. Sobe/derruba a API e o simulador de
@@ -127,7 +127,7 @@ function Start-Simulator {
 
     if (-not $deviceId -or -not $apiKey) {
         $js = 'const { DatabaseSync } = require("node:sqlite");' +
-              'const db = new DatabaseSync("./data/veiculotracker.db", { readOnly: true });' +
+              'const db = new DatabaseSync("./data/securitas.db", { readOnly: true });' +
               'const r = db.prepare("SELECT device_id, api_key FROM devices ORDER BY id LIMIT 1").get();' +
               'console.log(r ? r.device_id + " " + r.api_key : "");'
         Push-Location $Dir

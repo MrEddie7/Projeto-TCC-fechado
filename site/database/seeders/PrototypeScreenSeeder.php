@@ -8,7 +8,7 @@ use Illuminate\Database\Seeder;
 class PrototypeScreenSeeder extends Seeder
 {
     /**
-     * Telas do app VeiculoTracker descritas a partir do conteúdo do Figma/Visily.
+     * Telas do app Securitas descritas a partir do conteúdo do Figma/Visily.
      * A demonstração técnica (dashboard) renderiza estes protótipos.
      */
     public function run(): void

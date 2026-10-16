@@ -1,5 +1,5 @@
 {
-  "name": "veiculotracker-backend",
+  "name": "securitas-backend",
   "version": "1.0.0",
   "description": "API de ponte entre o hardware rastreador (GPS IoT) e o app Securitas (TCC)",
   "main": "src/server.js",

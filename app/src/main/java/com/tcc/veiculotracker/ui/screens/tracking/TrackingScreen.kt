@@ -1,5 +1,8 @@
 package com.tcc.veiculotracker.ui.screens.tracking
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -30,6 +33,22 @@ fun TrackingScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Pede a permissão de localização em tempo de execução: sem ela o celular
+    // não é rastreado nem aparece como "conectado" no painel.
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        viewModel.onLocationPermissionResult(result.values.any { it })
+    }
+    val requestLocationPermission = {
+        permissionLauncher.launch(
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            )
+        )
+    }
 
     LaunchedEffect(state.error) {
         state.error?.let {
@@ -130,7 +149,14 @@ fun TrackingScreen(
                         ) {
                             Button(
                                 onClick = {
-                                    if (state.isTracking) viewModel.stopTracking() else viewModel.startTracking()
+                                    if (state.isTracking) {
+                                        viewModel.stopTracking()
+                                    } else {
+                                        if (!state.phonePermissionGranted) {
+                                            requestLocationPermission()
+                                        }
+                                        viewModel.startTracking()
+                                    }
                                 },
                                 modifier = Modifier.weight(1f),
                                 colors = if (state.isTracking) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error) else ButtonDefaults.buttonColors()
@@ -187,6 +213,19 @@ fun TrackingScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
+
+                    if (state.isTracking && !state.phonePermissionGranted) {
+                        TextButton(
+                            onClick = { requestLocationPermission() },
+                            modifier = Modifier
+                                .padding(horizontal = 12.dp)
+                                .padding(bottom = 8.dp)
+                        ) {
+                            Icon(Icons.Default.LocationOn, contentDescription = null)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Conceder permissão de localização")
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))

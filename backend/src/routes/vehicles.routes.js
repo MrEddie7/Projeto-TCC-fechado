@@ -4,6 +4,10 @@ import { db } from '../db/database.js';
 import { requireAuth } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/error.js';
 import { HttpError } from '../util/http-error.js';
+import {
+  getSimulationDecision,
+  applySimulationDecision,
+} from '../services/simulation.service.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -170,6 +174,35 @@ router.post(
       .run(deviceId, apiKey, v.id, now);
     const device = db.prepare('SELECT * FROM devices WHERE id = ?').get(Number(info.lastInsertRowid));
     res.status(201).json({ device: serializeDevice(device) });
+  })
+);
+
+// Consultar a decisão de simulação do veículo.
+// O app chama isto logo após criar o veículo, para "perguntar ao backend"
+// se ele deve entrar na frota simulada.
+router.get(
+  '/:id/simulation',
+  asyncHandler(async (req, res) => {
+    const v = assertOwnsVehicle(req.user.id, req.params.id);
+    res.json({ simulation: getSimulationDecision(v) });
+  })
+);
+
+// Aplicar a escolha do app: { simulate: true | false }.
+router.post(
+  '/:id/simulation',
+  asyncHandler(async (req, res) => {
+    const v = assertOwnsVehicle(req.user.id, req.params.id);
+    const simulate = req.body?.simulate;
+    if (typeof simulate !== 'boolean') {
+      throw new HttpError(400, 'Informe simulate: true (simular) ou false (teste real)');
+    }
+    const { vehicle, device } = applySimulationDecision(v, simulate);
+    res.json({
+      simulation: getSimulationDecision(vehicle),
+      vehicle: serializeVehicle(vehicle),
+      device: serializeDevice(device),
+    });
   })
 );
 

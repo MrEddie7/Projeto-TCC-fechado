@@ -28,7 +28,7 @@ class UserSeeder extends Seeder
                 [
                     'name' => $user['name'],
                     'role' => $user['role'],
-                    'password' => 'veiculotracker123',
+                    'password' => 'securitas123',
                     'email_verified_at' => now(),
                 ]
             );

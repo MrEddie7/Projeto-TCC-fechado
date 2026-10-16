@@ -105,22 +105,6 @@ fun SettingsScreen(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Modo escuro", style = MaterialTheme.typography.bodyLarge)
-                    Text("Alterar aparência do app", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
-                }
-                Switch(
-                    checked = state.isDarkMode,
-                    onCheckedChange = { viewModel.updateDarkMode(it) }
-                )
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
                     Text("Notificações", style = MaterialTheme.typography.bodyLarge)
                     Text("Receber alertas", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
                 }

@@ -32,6 +32,13 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
     private val userId: Long get() = prefs.getLong(Constants.KEY_USER_ID, -1)
 
     init {
+        viewModelScope.launch {
+            val backend = syncManager.backendRepository
+            if (backend != null && backend.isConfigured && userId > 0) {
+                runCatching { syncManager.pushLocalVehiclesToBackend(userId) }
+                runCatching { syncManager.syncVehiclesFromBackend() }
+            }
+        }
         loadVehicles()
     }
 
@@ -52,13 +59,12 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
         viewModelScope.launch {
             _state.value = _state.value.copy(isExecuting = true, error = null)
             try {
-                // Atualiza o Room e propaga para o Firestore (via repositório)
+                // Atualiza o Room (otimista) para refletir na hora.
                 vehicleRepository.setBlocked(vehicle.id, true)
-                // Envia comando para o rastreador via Realtime Database
-                syncManager.sendCommand(vehicle.id, "block")
+                dispatchCommand(vehicle.id, "block")
                 _state.value = _state.value.copy(
                     isExecuting = false,
-                    lastAction = "Veículo bloqueado com sucesso"
+                    lastAction = "Comando de bloqueio enviado ao rastreador"
                 )
             } catch (e: Exception) {
                 _state.value = _state.value.copy(
@@ -75,10 +81,10 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
             _state.value = _state.value.copy(isExecuting = true, error = null)
             try {
                 vehicleRepository.setBlocked(vehicle.id, false)
-                syncManager.sendCommand(vehicle.id, "unblock")
+                dispatchCommand(vehicle.id, "unblock")
                 _state.value = _state.value.copy(
                     isExecuting = false,
-                    lastAction = "Veículo desbloqueado com sucesso"
+                    lastAction = "Comando de desbloqueio enviado ao rastreador"
                 )
             } catch (e: Exception) {
                 _state.value = _state.value.copy(
@@ -86,6 +92,25 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
                     error = "Erro ao desbloquear veículo"
                 )
             }
+        }
+    }
+
+    /**
+     * Envia o comando de controle remoto pelo canal correto:
+     *  - com backend configurado, usa a fila do backend
+     *    (`POST /v1/vehicles/:id/commands`), consumida e confirmada pelo
+     *    rastreador — inclusive os veículos simulados pelo próprio backend;
+     *  - sem backend, cai para o Realtime Database (modo offline do app).
+     *
+     * Sem isso o comando ia só para o RTDB, que ninguém consome, e o
+     * dispositivo simulado nunca era efetivamente bloqueado.
+     */
+    private suspend fun dispatchCommand(vehicleId: Long, command: String) {
+        val backend = syncManager.backendRepository
+        if (backend != null && backend.isConfigured) {
+            syncManager.sendCommandToBackend(vehicleId, command).getOrThrow()
+        } else {
+            syncManager.sendCommand(vehicleId, command)
         }
     }
 

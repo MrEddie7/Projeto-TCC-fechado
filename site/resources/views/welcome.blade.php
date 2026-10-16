@@ -3,7 +3,7 @@
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta name="description" content="VeiculoTracker (Securitas) — sistema de rastreamento veicular, telemetria, bloqueio remoto e gestão de rotas. Projeto de TCC.">
+        <meta name="description" content="Securitas — sistema de rastreamento veicular, telemetria, bloqueio remoto e gestão de rotas. Projeto de TCC.">
 
         <title>{{ config('app.name', 'Laravel') }} — Painel do TCC</title>
 
@@ -18,8 +18,8 @@
             <header class="sticky top-0 z-40 border-b border-white/10 bg-slate-950/80 backdrop-blur">
                 <nav class="mx-auto flex max-w-6xl items-center justify-between px-5 py-3.5">
                     <a href="{{ route('home') }}" class="flex items-center gap-2.5 font-semibold text-white">
-                        <span class="grid h-8 w-8 place-items-center rounded-lg bg-blue-500 text-slate-950">VT</span>
-                        <span class="text-sm tracking-tight">VeiculoTracker <span class="text-blue-400">· Securitas</span></span>
+                        <span class="grid h-8 w-8 place-items-center rounded-lg bg-blue-500 text-slate-950">S</span>
+                        <span class="text-sm tracking-tight">Securitas</span>
                     </a>
 
                     <div class="flex items-center gap-2">
@@ -54,7 +54,7 @@
                             Rastreamento veicular, telemetria e <span class="text-blue-400">bloqueio remoto</span> em tempo real.
                         </h1>
                         <p class="mt-5 max-w-2xl text-base leading-relaxed text-slate-400">
-                            O <strong class="text-slate-200">VeiculoTracker</strong> é um sistema móvel (Android nativo)
+                            O <strong class="text-slate-200">Securitas</strong> é um sistema móvel (Android nativo)
                             que monitora a localização da frota sobre o Google Maps, emite comandos de corte de ignição
                             e analisa rotas históricas — com arquitetura offline-first e sincronização contínua com a nuvem (Firebase).
                         </p>
@@ -273,7 +273,7 @@
 
             <footer class="border-t border-white/10 py-6">
                 <div class="mx-auto max-w-6xl px-5 text-center text-xs text-slate-500">
-                    VeiculoTracker · Securitas — TCC · Laravel {{ Illuminate\Foundation\Application::VERSION }} / PHP {{ PHP_VERSION }}
+                    Securitas — TCC · Laravel {{ Illuminate\Foundation\Application::VERSION }} / PHP {{ PHP_VERSION }}
                 </div>
             </footer>
         </div>

@@ -148,4 +148,24 @@ fun VehicleRegisterScreen(
             }
         }
     }
+
+    // Pergunta ao backend respondida com os dados do veículo: o usuário decide
+    // se o veículo entra na frota simulada. A escolha é enviada de volta.
+    state.pendingSimulation?.let { prompt ->
+        AlertDialog(
+            onDismissRequest = { viewModel.answerSimulation(false) },
+            title = { Text("Adicionar à simulação?") },
+            text = { Text(prompt.reason) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.answerSimulation(true) }) {
+                    Text(if (prompt.recommended) "Sim, simular" else "Simular")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.answerSimulation(false) }) {
+                    Text("Não")
+                }
+            }
+        )
+    }
 }

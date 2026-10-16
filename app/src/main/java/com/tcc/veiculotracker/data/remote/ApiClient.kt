@@ -15,7 +15,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
 /**
- * Cliente HTTP para comunicação com o backend Node.js (VeiculoTracker API).
+ * Cliente HTTP para comunicação com o backend Node.js (Securitas API).
  * 
  * O backend é a ponte entre o app e o hardware rastreador (GPS IoT).
  * Todas as chamadas passam por ele, que gerencia a fila de comandos,
@@ -185,6 +185,41 @@ class ApiClient(private val context: Context) {
 
     suspend fun deleteVehicle(id: Long): Result<Boolean> {
         return delete("/v1/vehicles/$id").map { true }
+    }
+
+    // ── Simulação do veículo ──────────────────────────────────────────────
+
+    data class SimulationDecisionDto(
+        val vehicleId: Long,
+        val simulated: Boolean,
+        val hasDevice: Boolean,
+        val deviceSimulated: Boolean,
+        val simulationAvailable: Boolean,
+        val recommended: Boolean,
+        val reason: String
+    )
+
+    /**
+     * Pergunta ao backend se este veículo deve entrar na frota simulada.
+     * Chamado pelo app logo após cadastrar um veículo.
+     */
+    suspend fun getSimulationDecision(vehicleId: Long): Result<SimulationDecisionDto> {
+        return get("/v1/vehicles/$vehicleId/simulation").map { json ->
+            val obj = JsonParser.parseString(json).asJsonObject
+            gson.fromJson(obj.getAsJsonObject("simulation"), SimulationDecisionDto::class.java)
+        }
+    }
+
+    /**
+     * Envia ao backend a escolha sobre a simulação:
+     * true = adicionar à simulação, false = manter como teste real.
+     */
+    suspend fun setVehicleSimulation(vehicleId: Long, simulate: Boolean): Result<SimulationDecisionDto> {
+        val body = mapOf("simulate" to simulate)
+        return post("/v1/vehicles/$vehicleId/simulation", body).map { json ->
+            val obj = JsonParser.parseString(json).asJsonObject
+            gson.fromJson(obj.getAsJsonObject("simulation"), SimulationDecisionDto::class.java)
+        }
     }
 
     // ── Comandos (bloqueio/desbloqueio) ────────────────────────────────────

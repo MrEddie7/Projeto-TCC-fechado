@@ -7,7 +7,7 @@ const DEMO = {
   name: process.env.SEED_NAME || 'Aluno TCC',
   email: process.env.SEED_EMAIL || 'aluno@tcc.com',
   phone: process.env.SEED_PHONE || '11988888888',
-  password: process.env.SEED_PASSWORD || 'veiculotracker123',
+  password: process.env.SEED_PASSWORD || 'securitas123',
   plate: process.env.SEED_PLATE || 'ABC1D23',
   model: process.env.SEED_MODEL || 'Onix',
   brand: process.env.SEED_BRAND || 'Chevrolet',

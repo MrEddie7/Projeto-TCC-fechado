@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────
-//  VEICULOTRACKER - SIMULADOR DE HARDWARE GPS
+//  SECURITAS - SIMULADOR DE HARDWARE GPS
 //  Emula um rastreador veicular (ESP32 + módulo GPS + rede) publicando
 //  telemetria HTTP na API e processando comandos (block/unblock).
 //
@@ -39,6 +39,9 @@ let lng = config.simulatorStartLng;
 let heading = 45; // graus (nordeste)
 let speed = 0;
 let step = 0;
+// Estado do relê de corte de ignição. Quando bloqueado, o veículo para de
+// andar (mas continua reportando telemetria, como um rastreador real).
+let blocked = false;
 
 function moveVehicle() {
   // Acelera até ~40 km/h, faz curvas suaves e reduz em "paradas" periódicas.
@@ -87,13 +90,26 @@ async function pollCommands() {
       ok,
       note: ok ? 'executado pelo relê' : 'falha no atuador',
     });
+    // Só muda o estado físico se o atuador executou de fato (ACK).
+    if (ok && cmd.command === 'block') {
+      blocked = true;
+      console.log('[sim] ignição CORTADA (veículo bloqueado)');
+    } else if (ok && cmd.command === 'unblock') {
+      blocked = false;
+      console.log('[sim] ignição LIBERADA (veículo desbloqueado)');
+    }
     console.log(`[sim] confirmado ${ok ? 'ACK' : 'NACK'} para comando ${cmd.id}`);
   }
   return (json.commands || []).length;
 }
 
 async function sendTelemetry() {
-  moveVehicle();
+  if (blocked) {
+    // Ignorado o avanço: o veículo permanece na posição, com velocidade 0.
+    speed = 0;
+  } else {
+    moveVehicle();
+  }
   const { status, json } = await request('POST', '/v1/hardware/telemetry', {
     latitude: Number(lat.toFixed(6)),
     longitude: Number(lng.toFixed(6)),
@@ -123,6 +139,11 @@ async function boot() {
     lat = Number(json.vehicle.latitude);
     lng = Number(json.vehicle.longitude);
     console.log(`[sim] retomando da posição atual: ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+  }
+  // Sincroniza o estado do relê com o que o backend já registrou.
+  if (json.vehicle && json.vehicle.isBlocked) {
+    blocked = true;
+    console.log('[sim] veículo está BLOQUEADO no backend; ignição permanecerá cortada');
   }
 }
 

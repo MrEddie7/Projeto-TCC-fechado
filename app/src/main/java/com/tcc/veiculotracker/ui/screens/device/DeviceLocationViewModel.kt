@@ -65,12 +65,20 @@ class DeviceLocationViewModel(application: Application) : AndroidViewModel(appli
                 Log.d(TAG, "Localização atualizada: ${location.latitude}, ${location.longitude}")
             }
         }
+
+        // Ao iniciar o rastreamento, já liga o envio automático para a API:
+        // assim o celular aparece como "conectado/ativo" no painel sem exigir
+        // que o usuário ligue o switch manualmente.
+        if (backendRepository.isConfigured) {
+            setAutoSend(true)
+        }
     }
 
     fun stopTracking() {
         _state.value = _state.value.copy(isTracking = false)
         locationJob?.cancel()
         locationJob = null
+        if (_state.value.isAutoSend) setAutoSend(false)
     }
 
     fun sendLocationToBackend() {
@@ -137,8 +145,13 @@ class DeviceLocationViewModel(application: Application) : AndroidViewModel(appli
                             sendStatus = "Enviado automaticamente"
                         )
                     }
+                    // Depois do primeiro envio, mantém o intervalo normal.
+                    kotlinx.coroutines.delay(SEND_INTERVAL_MS)
+                } else {
+                    // Ainda sem fix de GPS: tenta de novo logo para o celular
+                    // aparecer conectado o quanto antes.
+                    kotlinx.coroutines.delay(1000)
                 }
-                kotlinx.coroutines.delay(SEND_INTERVAL_MS)
             }
         }
     }

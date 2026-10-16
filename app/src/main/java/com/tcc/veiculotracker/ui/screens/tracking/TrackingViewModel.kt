@@ -53,6 +53,12 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
     }
 
     init {
+        viewModelScope.launch {
+            if (syncManager.backendRepository?.isConfigured == true && userId > 0) {
+                runCatching { syncManager.pushLocalVehiclesToBackend(userId) }
+                runCatching { syncManager.syncVehiclesFromBackend() }
+            }
+        }
         loadVehicles()
     }
 
@@ -77,6 +83,23 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
     fun startTracking() {
         val vehicle = _state.value.selectedVehicle ?: return
         _state.value = _state.value.copy(isTracking = true)
+        // Iniciar imediatamente a rota no backend (integração com painel de controle)
+        viewModelScope.launch {
+            syncManager.backendRepository?.let { backend ->
+                if (backend.isConfigured) {
+                    runCatching { syncManager.startRouteInBackend(vehicle.id) }
+                        .onSuccess { result ->
+                            result.onSuccess { route ->
+                                // Rota iniciada com sucesso no backend
+                            }.onFailure { e ->
+                                _state.value = _state.value.copy(
+                                    error = e.message ?: "Erro ao iniciar rota no backend"
+                                )
+                            }
+                        }
+                }
+            }
+        }
         startListening(vehicle)
         startPhoneTracking()
     }
@@ -236,8 +259,36 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         phoneJob = null
     }
 
+    /**
+     * Chamado pela tela após o usuário responder ao pedido de permissão de
+     * localização feito em tempo de execução. Se o rastreamento está ativo e a
+     * permissão foi concedida, (re)inicia o rastreio do celular junto do veículo
+     * — é isso que faz o aparelho aparecer como "conectado" no painel.
+     */
+    fun onLocationPermissionResult(granted: Boolean) {
+        if (granted && _state.value.isTracking) {
+            startPhoneTracking()
+        } else if (!granted) {
+            _state.value = _state.value.copy(
+                phonePermissionGranted = false,
+                error = "Permissão de localização negada — o celular não será rastreado"
+            )
+        }
+    }
+
     fun stopTracking() {
+        val vehicle = _state.value.selectedVehicle
         _state.value = _state.value.copy(isTracking = false)
+        // Finalizar rota no backend
+        vehicle?.let {
+            viewModelScope.launch {
+                syncManager.backendRepository?.let { backend ->
+                    if (backend.isConfigured) {
+                        runCatching { syncManager.stopRouteInBackend(it.id) }
+                    }
+                }
+            }
+        }
         stopListening()
         stopPhoneTracking()
     }

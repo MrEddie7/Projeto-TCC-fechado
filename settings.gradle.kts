@@ -17,5 +17,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "VeiculoTracker"
+rootProject.name = "Securitas"
 include(":app")

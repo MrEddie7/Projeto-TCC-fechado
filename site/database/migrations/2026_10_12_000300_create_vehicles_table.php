@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration
 {
     /**
-     * Frota de demonstração do TCC (VeiculoTracker / Securitas).
+     * Frota de demonstração do TCC (Securitas).
      * Ainda sem CRUD: os dados são exibidos na landing page e no dashboard.
      */
     public function up(): void

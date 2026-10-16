@@ -22,6 +22,7 @@ data class DashboardState(
 class DashboardViewModel(application: Application) : AndroidViewModel(application) {
 
     private val vehicleRepository = (application as App).vehicleRepository
+    private val syncManager = (application as App).syncManager
     private val prefs = application.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
 
     private val _state = MutableStateFlow(DashboardState())
@@ -31,7 +32,20 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     init {
         viewModelScope.launch {
-            vehicleRepository.pullFromCloud(userId)
+            val backend = (application as App).backendRepository
+            if (backend.isConfigured && userId > 0) {
+                runCatching { syncManager.pushLocalVehiclesToBackend(userId) }
+                runCatching { syncManager.syncVehiclesFromBackend() }
+            } else {
+                vehicleRepository.pullFromCloud(userId)
+            }
+        }
+        viewModelScope.launch {
+            val backend = (application as App).backendRepository
+            if (backend.isConfigured && userId > 0) {
+                runCatching { syncManager.pushLocalVehiclesToBackend(userId) }
+                runCatching { syncManager.syncVehiclesFromBackend() }
+            }
         }
         loadDashboard()
     }

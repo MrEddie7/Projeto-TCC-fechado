@@ -39,7 +39,7 @@ function count(table, where = '', ...params) {
 function serviceInfo() {
   const uptimeSeconds = Math.round(process.uptime());
   return {
-    name: 'veiculotracker-backend',
+    name: 'securitas-backend',
     version: readVersion(),
     node: process.version,
     platform: process.platform,

@@ -7,6 +7,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -17,7 +18,10 @@ fun VehicleDetailScreen(
     vehicleId: Long,
     onNavigateBack: () -> Unit,
     viewModel: VehicleDetailViewModel = viewModel(
-        factory = VehicleDetailViewModelFactory(vehicleId)
+        factory = VehicleDetailViewModelFactory(
+            application = LocalContext.current.applicationContext as android.app.Application,
+            vehicleId = vehicleId
+        )
     )
 ) {
     val vehicle by viewModel.vehicle.collectAsState()
