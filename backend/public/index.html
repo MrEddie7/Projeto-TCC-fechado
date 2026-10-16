@@ -126,6 +126,20 @@
   .badge.blocked { color: var(--err); border-color: rgba(240,97,109,.4); }
   .badge.sim { color: var(--warn); border-color: rgba(240,180,41,.45); }
   .badge.real { color: var(--info); border-color: rgba(76,141,255,.45); }
+  .badge.phone { color: #6ee7ff; border-color: rgba(110,231,255,.5); }
+
+  button.small { padding: 3px 8px; font-size: 11.5px; border-radius: 6px; }
+
+  .cloud-row, .sim-row {
+    display: grid; grid-template-columns: 1fr auto; gap: 4px 10px;
+    align-items: center; padding: 9px 13px; border-bottom: 1px solid rgba(38,43,54,.5);
+    font-size: 12.5px;
+  }
+  .cloud-row:last-child, .sim-row:last-child { border-bottom: 0; }
+  .cloud-row b, .sim-row b { font-family: ui-monospace, monospace; }
+  .cloud-row .sub, .sim-row .sub { color: var(--muted); font-size: 11.5px; }
+  .sim-row select { padding: 3px 6px; font-size: 12px; }
+  .sim-row select:disabled { opacity: .6; }
 
   #realTest { padding: 0; }
   .real-section { border-left: 3px solid var(--info); }
@@ -225,6 +239,25 @@
 
       <section class="panel">
         <div class="head">
+          <h2>📱 Enviados pelo celular (Firestore)</h2>
+          <div class="spacer"></div>
+          <button type="button" class="small" id="btnImportCloud">Sincronizar do celular</button>
+          <span class="chip" id="chipCloud"><span class="dot"></span><span>—</span></span>
+        </div>
+        <div id="phoneVehicles"><div class="empty-state">Entre para ver os veículos enviados pelo app.</div></div>
+      </section>
+
+      <section class="panel">
+        <div class="head">
+          <h2>Simulação da frota</h2>
+          <div class="spacer"></div>
+          <span class="meta" id="simMeta">—</span>
+        </div>
+        <div id="simulation"><div class="empty-state">Entre para gerenciar a simulação.</div></div>
+      </section>
+
+      <section class="panel">
+        <div class="head">
           <h2>Usuários e veículos</h2>
           <div class="spacer"></div>
           <span class="meta" id="usersMeta">—</span>
@@ -274,7 +307,7 @@
           </div>
         </div>
         <div style="display:flex; gap:16px; padding:8px 12px; font-size:11.5px; color:var(--muted); align-items:center; flex-wrap:wrap">
-          <span><b style="color:var(--info)">●</b> Veículo selecionado</span>
+          <span><b style="color:var(--info)">●</b> Celular Ativo</span>
           <span><b style="color:var(--ok)">●</b> Frota real (todos os usuários)</span>
           <span><b style="color:var(--warn)">●</b> Frota simulador</span>
           <span id="mapPhoneLegend" hidden><b style="color:#2979ff">●</b> Celular (teste real) · junto do veículo</span>
@@ -406,8 +439,11 @@ function renderOverview(o) {
   $('stApi').textContent = s.version ? 'v' + s.version : 'online';
   $('stApiSub').textContent = `${s.node || 'node'} · uptime ${fmtUptime(s.uptimeSeconds)}`;
   $('stUsers').textContent = c.users ?? '—';
-  $('stVehicles').textContent = c.vehicles ?? '—';
-  $('stVehiclesSub').textContent = `${c.onlineVehicles ?? 0} online · ${c.blockedVehicles ?? 0} bloqueados · ${c.simulatedVehicles ?? 0} simulador`;
+  const totalVehicles = (c.vehicles ?? 0) + (c.phoneVehicles ?? 0);
+  $('stVehicles').textContent = totalVehicles || '—';
+  $('stVehiclesSub').textContent =
+    `${c.onlineVehicles ?? 0} online · ${c.blockedVehicles ?? 0} bloqueados · ` +
+    `${c.simulatedVehicles ?? 0} simulador · ${c.phoneVehicles ?? 0} só celular`;
   $('stDevices').textContent = c.devices ?? '—';
   $('stTelemetry').textContent = c.telemetryPoints ?? '—';
   $('stRoutes').textContent = c.routes ?? '—';
@@ -415,7 +451,7 @@ function renderOverview(o) {
   $('stCommands').textContent = c.commands ?? '—';
   $('stCommandsSub').textContent = `${c.pendingCommands ?? 0} pendentes`;
   $('stMobile').textContent = c.mobileLocations ?? '—';
-  $('stMobileSub').textContent = `${c.recentMobileLocations ?? 0} recentes · teste real (app, fora do simulador)`;
+  $('stMobileSub').textContent = `${c.recentMobileLocations ?? 0} recentes · ${c.phoneVehicles ?? 0} veíc. do celular`;
   $('stRealTest').textContent = (c.realVehicles ?? 0);
   $('stRealTestSub').textContent = `${c.realVehicles ?? 0} veículo(s) reais · ${c.simulatedVehicles ?? 0} no simulador`;
   $('cardCommands').classList.toggle('warnv', (c.pendingCommands || 0) > 0);
@@ -433,6 +469,13 @@ function renderOverview(o) {
     ['Banco', s.dbPath || '—'],
     ['Sync Firebase', (sync.enabled ? 'ligado' : 'desligado') + ' · ' + (sync.credentials || '—')],
     ['Última sync', sync.lastRun ? fmtTime(sync.lastRun) : 'nunca'],
+    [
+      'Recebido do app',
+      sync.inbound
+        ? `${sync.inbound.users || 0} conta(s) · ${sync.inbound.vehicles || 0} veículo(s) do Firestore` +
+          (sync.inbound.error ? ` · erro: ${sync.inbound.error}` : '')
+        : '—',
+    ],
   ];
   $('serviceKV').innerHTML = rows
     .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`)
@@ -447,6 +490,8 @@ function renderOverview(o) {
     if (u && u.mobileLocation) mobileByUser[u.id] = u.mobileLocation;
   }
   renderRealTest(o);
+  renderPhoneVehicles(o);
+  renderSimulation(o);
   // Mapa: desenha a frota inteira (veículos de todos os usuários) e depois o
   // marcador do celular do proprietário selecionado.
   renderFleet(o.vehicles || []);
@@ -466,11 +511,18 @@ function renderUsers(users) {
   box.innerHTML = users.map((u) => {
     const vehicles = u.vehicles.length
       ? u.vehicles.map((v) => {
+          const isPhone = v.origin === 'firestore' || v.source === 'firestore';
+          const isOnlyCloud = v.source === 'firestore' && v.origin === 'firestore' && !v.device;
           const badges = [
-            v.online ? '<span class="badge on">online</span>' : '<span class="badge off">offline</span>',
+            isOnlyCloud
+              ? '<span class="badge off">só na nuvem</span>'
+              : (v.online ? '<span class="badge on">online</span>' : '<span class="badge off">offline</span>'),
             v.isBlocked ? '<span class="badge blocked">bloqueado</span>' : '',
-            v.simulated ? '<span class="badge sim">simulador</span>' : '<span class="badge real">teste real</span>',
-          ].join('');
+            isPhone ? '<span class="badge phone">📱 celular</span>' : '',
+            !isOnlyCloud && (v.simulated
+              ? '<span class="badge sim">simulador</span>'
+              : '<span class="badge real">teste real</span>'),
+          ].filter(Boolean).join('');
           return `
             <div class="vehicle">
               <div>
@@ -479,19 +531,24 @@ function renderUsers(users) {
               </div>
               <div class="right">
                 <div>${v.speed ?? 0} km/h</div>
-                <div>${esc(v.device ? v.device.deviceId : 'sem device')}</div>
+                <div>${esc(v.device ? v.device.deviceId : isOnlyCloud ? 'só Firestore' : 'sem device')}</div>
                 <div>${fmtAgo(v.lastUpdate)}</div>
               </div>
             </div>`;
         }).join('')
       : '<div class="model" style="margin-top:6px;color:var(--muted);font-size:12px">Nenhum veículo.</div>';
 
+    const fromCloud = u.vehicles.filter((v) => v.origin === 'firestore' || v.source === 'firestore').length;
+    const originTag = u.source === 'firestore'
+      ? ' <span class="badge phone" style="font-size:10px">📱 app</span>'
+      : '';
+
     return `
       <div class="user">
         <div class="who">
-          <b>${esc(u.name)}</b>
+          <b>${esc(u.name)}</b>${originTag}
           <span class="email">${esc(u.email)}</span>
-          <span class="id">#${u.id}${u.phone ? ' · ' + esc(u.phone) : ''}</span>
+          <span class="id">#${u.id}${u.phone ? ' · ' + esc(u.phone) : ''}${fromCloud ? ` · ${fromCloud} do celular` : ''}</span>
         </div>
         ${vehicles}
       </div>`;
@@ -549,6 +606,129 @@ function renderRealTest(o) {
       </div>`);
   }
   box.innerHTML = rows.join('');
+}
+
+// Veículos que o app (celular) enviou ao Firestore. Mostra quais já foram
+// importados para o backend (têm rastreador/id numérico) e quais ainda estão
+// apenas na nuvem. O botão "Sincronizar do celular" dispara a importação.
+function renderPhoneVehicles(o) {
+  const box = $('phoneVehicles');
+  const chip = $('chipCloud');
+  const list = o.phoneVehicles || [];
+  const imported = list.filter((v) => v.source !== 'firestore').length;
+  const onlyCloud = list.length - imported;
+
+  if (!list.length) {
+    box.innerHTML = '<div class="empty-state">Nenhum veículo enviado pelo celular ainda.</div>';
+    setChip(chip, 'warn', 'nenhum');
+    return;
+  }
+  setChip(chip, 'live', `${list.length} do celular`);
+
+  box.innerHTML = list.map((v) => {
+    const owner = v.owner || {};
+    const state = v.source === 'firestore'
+      ? '<span class="badge off">só na nuvem</span>'
+      : '<span class="badge on">no backend</span>';
+    const tracker = v.device
+      ? `rastreador ${esc(v.device.model || 'app')} · ${v.device.simulated ? 'virtual' : 'real'}`
+      : 'sem rastreador';
+    return `
+      <div class="cloud-row">
+        <div>
+          <b>${esc(v.plate)}</b> ${state}
+          <div class="sub">${esc(v.brand)} ${esc(v.model)} · ${esc(v.year)} · dono ${esc(owner.name || owner.email || '—')}</div>
+        </div>
+        <div class="sub" style="text-align:right">
+          ${v.online ? 'online' : 'offline'} · ${tracker}
+        </div>
+      </div>`;
+  }).join('') +
+    `<div class="sub" style="padding:8px 13px">${imported} importado(s) · ${onlyCloud} só na nuvem</div>`;
+}
+
+// Seletor por veículo: adiciona/tira da simulação. Veículos com rastreador real
+// (hardware/'app-tracker') não podem ser simulados — a opção fica desabilitada.
+function renderSimulation(o) {
+  const box = $('simulation');
+  const list = [];
+  for (const u of o.users || []) {
+    for (const v of u.vehicles || []) {
+      // Exclui apenas veículos que ainda só existem na nuvem (source='firestore' E sem device).
+      const onlyCloud = (v.source === 'firestore') && !(v.device);
+      if (!onlyCloud) list.push({ user: u, vehicle: v });
+    }
+  }
+  const simulated = list.filter((x) => x.vehicle.simulated).length;
+  $('simMeta').textContent = `${simulated}/${list.length} no simulador`;
+
+  if (!list.length) {
+    box.innerHTML = '<div class="empty-state">Nenhum veículo no backend ainda.</div>';
+    return;
+  }
+
+  box.innerHTML = list.map(({ user, vehicle }) => {
+    const sim = vehicle.simulation || {};
+    const hasRealTracker = sim.hasDevice && !sim.deviceSimulated;
+    const onOpt = hasRealTracker
+      ? '<option value="1" disabled>Simulador (rastreador real)</option>'
+      : `<option value="1"${vehicle.simulated ? ' selected' : ''}>Simulador</option>`;
+    const offOpt = `<option value="0"${vehicle.simulated ? '' : ' selected'}>Teste real</option>`;
+    const simDisabled = !sim.simulationAvailable;
+    return `
+      <div class="sim-row">
+        <div>
+          <b>${esc(vehicle.plate)}</b>
+          <div class="sub">${esc(user.name)} · ${esc(vehicle.brand)} ${esc(vehicle.model)}${hasRealTracker ? ' · rastreador real' : ''}</div>
+        </div>
+        <select data-vehicle="${vehicle.id}"${simDisabled ? ' disabled' : ''} title="${esc(sim.reason || '')}">
+          ${offOpt}${onOpt}
+        </select>
+      </div>`;
+  }).join('');
+
+  box.querySelectorAll('select[data-vehicle]').forEach((sel) => {
+    sel.addEventListener('change', onSimulationChange);
+  });
+}
+
+async function onSimulationChange(ev) {
+  const sel = ev.target;
+  const id = Number(sel.dataset.vehicle);
+  const simulate = sel.value === '1';
+  sel.disabled = true;
+  const res = await api(`/v1/admin/vehicles/${id}/simulation`, {
+    method: 'POST',
+    body: JSON.stringify({ simulate }),
+  });
+  sel.disabled = false;
+  if (!res.ok) {
+    alert(res.data.error || 'Não foi possível alterar a simulação.');
+  }
+  await refreshOverview();
+}
+
+async function importFromPhoneCloud() {
+  const btn = $('btnImportCloud');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Sincronizando…';
+  const res = await api('/v1/admin/cloud/import', {
+    method: 'POST',
+    body: JSON.stringify({ createTracker: true }),
+  });
+  btn.disabled = false;
+  btn.textContent = label;
+  if (!res.ok) {
+    alert(res.data.error || 'Não foi possível sincronizar do celular.');
+    return;
+  }
+  const imp = res.data.import || {};
+  if (imp.error) {
+    alert('Firestore indisponível: ' + imp.error);
+    return;
+  }
+  await refreshOverview();
 }
 
 async function refreshOverview() {
@@ -694,6 +874,7 @@ function renderLogs() {
 
 $('follow').addEventListener('change', renderLogs);
 $('onlyErr').addEventListener('change', renderLogs);
+$('btnImportCloud').addEventListener('click', importFromPhoneCloud);
 
 // ── Streams ──────────────────────────────────────────────────────────────
 
@@ -802,7 +983,8 @@ async function loadVehicles() {
     const opt = document.createElement('option');
     opt.value = v.id;
     const owner = v.owner?.name ? ` · ${v.owner.name}` : '';
-    opt.textContent = `${v.plate} — ${v.brand} ${v.model}${owner}`;
+    const tag = v.origin === 'firestore' ? ' 📱' : '';
+    opt.textContent = `${v.plate}${tag} — ${v.brand} ${v.model}${owner}`;
     sel.appendChild(opt);
   }
   sel.onchange = () => selectVehicle(Number(sel.value));
@@ -877,6 +1059,10 @@ $('btnLogout').addEventListener('click', async () => {
   $('usersMeta').textContent = '—';
   $('realTest').innerHTML = '<div class="empty-state">—</div>';
   setChip($('chipReal'), '', '—');
+  $('phoneVehicles').innerHTML = '<div class="empty-state">Entre para ver os veículos enviados pelo app.</div>';
+  setChip($('chipCloud'), '', '—');
+  $('simulation').innerHTML = '<div class="empty-state">Entre para gerenciar a simulação.</div>';
+  $('simMeta').textContent = '—';
   $('mapPhoneLegend').hidden = true;
   fleetLayer.clearLayers();
   fleetByVehicle = {};

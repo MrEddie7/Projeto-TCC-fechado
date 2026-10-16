@@ -10,6 +10,9 @@ export const db = new DatabaseSync(config.dbPath);
 db.exec('PRAGMA journal_mode = WAL;');
 db.exec('PRAGMA foreign_keys = ON;');
 
+// Bug 12 fix: updated_at e origin incluídos no CREATE TABLE original.
+// As migrações ensureColumn abaixo continuam existindo para bancos já criados,
+// mas novos bancos nascem com o schema completo sem depender de ALTER TABLE.
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -17,7 +20,9 @@ CREATE TABLE IF NOT EXISTS users (
   email         TEXT NOT NULL UNIQUE,
   phone         TEXT DEFAULT '',
   password_hash TEXT NOT NULL,
-  created_at    INTEGER NOT NULL
+  created_at    INTEGER NOT NULL,
+  updated_at    INTEGER NOT NULL DEFAULT 0,
+  origin        TEXT NOT NULL DEFAULT 'local'
 );
 
 CREATE TABLE IF NOT EXISTS tokens (
@@ -42,7 +47,9 @@ CREATE TABLE IF NOT EXISTS vehicles (
   speed       REAL NOT NULL DEFAULT 0,
   last_update INTEGER NOT NULL DEFAULT 0,
   simulated   INTEGER NOT NULL DEFAULT 0,
-  created_at  INTEGER NOT NULL
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL DEFAULT 0,
+  origin      TEXT NOT NULL DEFAULT 'backend'
 );
 
 CREATE TABLE IF NOT EXISTS devices (
@@ -70,18 +77,19 @@ CREATE TABLE IF NOT EXISTS telemetry (
 );
 
 CREATE TABLE IF NOT EXISTS routes (
-  id             INTEGER PRIMARY KEY AUTOINCREMENT,
-  vehicle_id     INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
-  user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  start_latitude REAL DEFAULT 0,
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  vehicle_id      INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+  user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  start_latitude  REAL DEFAULT 0,
   start_longitude REAL DEFAULT 0,
-  end_latitude   REAL DEFAULT 0,
-  end_longitude  REAL DEFAULT 0,
-  start_time     INTEGER NOT NULL,
-  end_time       INTEGER DEFAULT 0,
-  distance       REAL DEFAULT 0,
-  max_speed      REAL DEFAULT 0,
-  status         TEXT NOT NULL DEFAULT 'em_andamento'
+  end_latitude    REAL DEFAULT 0,
+  end_longitude   REAL DEFAULT 0,
+  start_time      INTEGER NOT NULL,
+  end_time        INTEGER DEFAULT 0,
+  distance        REAL DEFAULT 0,
+  max_speed       REAL DEFAULT 0,
+  status          TEXT NOT NULL DEFAULT 'em_andamento',
+  updated_at      INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS route_points (
@@ -139,6 +147,12 @@ function ensureColumn(table, column, ddl) {
 ensureColumn('users', 'updated_at', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('vehicles', 'updated_at', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('routes', 'updated_at', 'INTEGER NOT NULL DEFAULT 0');
+// Origem do registro: 'backend'/'local' = criado pela API/SQLite; 'firestore' =
+// importado do celular (app -> Firestore) pela rota POST /v1/admin/cloud/import.
+// A sincronização SQLite -> Firebase ignora as linhas de origem 'firestore' para
+// não recriar no Firestore documentos que já pertencem ao app.
+ensureColumn('users', 'origin', "TEXT NOT NULL DEFAULT 'local'");
+ensureColumn('vehicles', 'origin', "TEXT NOT NULL DEFAULT 'backend'");
 ensureColumn('vehicles', 'simulated', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('devices', 'simulated', 'INTEGER NOT NULL DEFAULT 0');
 

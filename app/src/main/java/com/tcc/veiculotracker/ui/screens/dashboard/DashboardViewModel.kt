@@ -31,20 +31,19 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     val userId: Long get() = prefs.getLong(Constants.KEY_USER_ID, -1)
 
     init {
+        // Bug 9 fix: havia dois blocos launch independentes executando o mesmo
+        // push/sync em paralelo, criando race condition no vehicleDao e chamadas
+        // duplicadas ao backend/Firebase. Unificado em um único bloco sequencial.
         viewModelScope.launch {
+            // Reenvia a conta logada + veículos ao Firestore ao abrir o app com
+            // sessão já ativa (inclusive se o envio falhou no login).
+            if (userId > 0) runCatching { syncManager.syncAccountToCloud(userId) }
             val backend = (application as App).backendRepository
             if (backend.isConfigured && userId > 0) {
                 runCatching { syncManager.pushLocalVehiclesToBackend(userId) }
                 runCatching { syncManager.syncVehiclesFromBackend() }
             } else {
                 vehicleRepository.pullFromCloud(userId)
-            }
-        }
-        viewModelScope.launch {
-            val backend = (application as App).backendRepository
-            if (backend.isConfigured && userId > 0) {
-                runCatching { syncManager.pushLocalVehiclesToBackend(userId) }
-                runCatching { syncManager.syncVehiclesFromBackend() }
             }
         }
         loadDashboard()

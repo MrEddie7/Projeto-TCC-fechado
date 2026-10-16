@@ -19,8 +19,12 @@ function setLastSync(key, value) {
 // ── Firestore: users / vehicles / routes ────────────────────────────────
 
 async function syncUsers(firestore, since, cutoff) {
+  // Bug 7 fix: filtro robusto — exclui apenas registros com origin='firestore'
+  // (importados do app), independente do valor default ('local' em users).
   const rows = db
-    .prepare('SELECT * FROM users WHERE updated_at > ? AND updated_at <= ?')
+    .prepare(
+      "SELECT * FROM users WHERE updated_at > ? AND updated_at <= ? AND origin NOT IN ('firestore')"
+    )
     .all(since, cutoff);
   if (rows.length === 0) return 0;
   for (const u of rows) {
@@ -38,8 +42,12 @@ async function syncUsers(firestore, since, cutoff) {
 }
 
 async function syncVehicles(firestore, since, cutoff) {
+  // Bug 7 fix: veículos importados do app (origin='firestore') não devem ser
+  // reenviados ao Firestore — o documento original já pertence ao app.
   const rows = db
-    .prepare('SELECT * FROM vehicles WHERE updated_at > ? AND updated_at <= ?')
+    .prepare(
+      "SELECT * FROM vehicles WHERE updated_at > ? AND updated_at <= ? AND origin NOT IN ('firestore')"
+    )
     .all(since, cutoff);
   for (const v of rows) {
     await firestore
@@ -116,20 +124,28 @@ async function syncTelemetry(rtdb) {
 }
 
 async function syncCommands(rtdb) {
-  // Publica o comando mais recente de cada veículo (o app escuta commands/{vehicleId}).
+  // Bug 6 fix: só publica comandos que ainda estão "pending" no RTDB.
+  // Publicar comandos já executados (status != 'pending') fazia o app re-aplicar
+  // bloqueio/desbloqueio ao reconectar, pois o ValueEventListener dispara
+  // imediatamente com o valor atual ao adicionar o listener.
   const vehicles = db.prepare('SELECT id FROM vehicles').all();
   let count = 0;
   for (const v of vehicles) {
-    const last = db
+    const pending = db
       .prepare(
-        'SELECT command, status, created_at FROM commands WHERE vehicle_id = ? ORDER BY id DESC LIMIT 1'
+        "SELECT command, status, created_at FROM commands WHERE vehicle_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 1"
       )
       .get(Number(v.id));
-    if (!last) continue;
+    if (!pending) {
+      // Sem comando pendente: limpa o nó para evitar que o app receba um
+      // comando antigo já executado ao se reconectar.
+      await rtdb.ref(`commands/${v.id}`).remove();
+      continue;
+    }
     await rtdb.ref(`commands/${v.id}`).set({
-      command: last.command,
-      timestamp: Number(last.created_at),
-      status: last.status,
+      command: pending.command,
+      timestamp: Number(pending.created_at),
+      status: pending.status,
     });
     count++;
   }

@@ -133,8 +133,14 @@ export function createApp() {
   });
 
   // Painel administrativo: estado da API, usuários+veículos e saúde das telas.
-  app.get('/v1/admin/overview', requireAuth, (_req, res) => {
-    res.json(buildOverview());
+  // buildOverview é async porque também lê do Firestore as contas/veículos
+  // enviados pelo app (Express 4 não captura rejeições sozinho: usa next).
+  app.get('/v1/admin/overview', requireAuth, async (_req, res, next) => {
+    try {
+      res.json(await buildOverview());
+    } catch (e) {
+      next(e);
+    }
   });
 
   // Status da sincronização

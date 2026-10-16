@@ -50,7 +50,10 @@ class BackendRepository(
         val result = apiClient.register(name, email, password, phone)
         result.onSuccess { auth ->
             apiClient.authToken = auth.token
-            prefs.edit().putLong(Constants.KEY_USER_ID, auth.user.id).apply()
+            // Bug 5 fix: grava o ID do backend em KEY_BACKEND_USER_ID, não em KEY_USER_ID.
+            // KEY_USER_ID é reservado para o ID do Room local (usado pelo VehicleRepository
+            // para filtrar veículos). Sobrescrevê-lo com o ID do backend causava lista vazia.
+            prefs.edit().putLong(Constants.KEY_BACKEND_USER_ID, auth.user.id).apply()
             prefs.edit().putString(Constants.KEY_USER_NAME, auth.user.name).apply()
             prefs.edit().putString(Constants.KEY_USER_EMAIL, auth.user.email).apply()
         }
@@ -61,7 +64,8 @@ class BackendRepository(
         val result = apiClient.login(email, password)
         result.onSuccess { auth ->
             apiClient.authToken = auth.token
-            prefs.edit().putLong(Constants.KEY_USER_ID, auth.user.id).apply()
+            // Bug 5 fix: mesmo motivo — ID do backend separado do ID Room.
+            prefs.edit().putLong(Constants.KEY_BACKEND_USER_ID, auth.user.id).apply()
             prefs.edit().putString(Constants.KEY_USER_NAME, auth.user.name).apply()
             prefs.edit().putString(Constants.KEY_USER_EMAIL, auth.user.email).apply()
         }
@@ -72,7 +76,7 @@ class BackendRepository(
         val result = apiClient.logout()
         result.onSuccess {
             clearAuthToken()
-            prefs.edit().remove(Constants.KEY_USER_ID).apply()
+            prefs.edit().remove(Constants.KEY_BACKEND_USER_ID).apply()
             prefs.edit().remove(Constants.KEY_USER_NAME).apply()
             prefs.edit().remove(Constants.KEY_USER_EMAIL).apply()
         }

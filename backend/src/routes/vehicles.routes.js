@@ -25,11 +25,17 @@ export function serializeVehicle(row) {
     color: row.color,
     isBlocked: row.is_blocked === 1,
     simulated: row.simulated === 1,
+    // 'backend' = criado pela API; 'firestore' = importado do celular.
+    origin: row.origin || 'backend',
+    // source espelha origin para manter consistência com os veículos vindos
+    // diretamente do Firestore (que recebem source='firestore' no mergeCloudAccounts).
+    source: row.origin || 'backend',
     latitude: row.latitude,
     longitude: row.longitude,
     speed: row.speed,
     lastUpdate: Number(row.last_update),
     createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at || 0),
   };
 }
 

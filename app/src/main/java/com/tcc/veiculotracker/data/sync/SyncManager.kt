@@ -8,6 +8,7 @@ import com.tcc.veiculotracker.data.remote.ApiClient
 import com.tcc.veiculotracker.data.remote.FirebaseDataSource
 import com.tcc.veiculotracker.data.repository.BackendRepository
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 
 /**
  * Responsável por encapsular o FirebaseDataSource + DAOs e orquestrar a
@@ -33,6 +34,36 @@ class SyncManager(
         runCatching { firebaseDataSource.syncUser(user) }
     }
 
+    /**
+     * Envia ao Firestore a conta logada e TODOS os veículos dela, vinculados ao
+     * UID da conta (firebaseUid / ownerUid / ownerEmail). É o "cadastro na
+     * nuvem" feito ao entrar no app, para o backend exibir a conta e a frota
+     * que vieram do aplicativo.
+     */
+    suspend fun syncAccountToCloud(user: User) {
+        runCatching { firebaseDataSource.syncUser(user) }
+        syncVehiclesToCloud(user.id)
+    }
+
+    /** Mesma ideia de [syncAccountToCloud], partindo do id local do usuário. */
+    suspend fun syncAccountToCloud(userId: Long) {
+        val user = db.userDao().getUserById(userId).first() ?: return
+        syncAccountToCloud(user)
+    }
+
+    /**
+     * Envia ao Firestore todos os veículos do usuário vinculados à conta logada.
+     * Retorna quantos foram enviados com sucesso.
+     */
+    suspend fun syncVehiclesToCloud(userId: Long): Int {
+        var sent = 0
+        for (vehicle in db.vehicleDao().getVehiclesListByUser(userId)) {
+            runCatching { firebaseDataSource.syncVehicle(vehicle) }
+                .onSuccess { sent++ }
+        }
+        return sent
+    }
+
     // ── Veículos ─────────────────────────────────────────────────────────
 
     suspend fun syncVehicle(vehicle: Vehicle) {
@@ -49,8 +80,9 @@ class SyncManager(
             .getOrDefault(emptyList())
     }
 
+    // Bug 2 fix: passa Long diretamente (assinatura corrigida no FirebaseDataSource).
     fun getVehiclesByUser(userId: Long): Flow<List<Vehicle>> {
-        return firebaseDataSource.getVehiclesByUser(userId.toString())
+        return firebaseDataSource.getVehiclesByUser(userId)
     }
 
     // ── Rotas ────────────────────────────────────────────────────────────
@@ -63,8 +95,9 @@ class SyncManager(
         runCatching { firebaseDataSource.deleteRoute(routeId.toString()) }
     }
 
+    // Bug 2 fix: passa Long diretamente.
     fun getRoutesByUser(userId: Long): Flow<List<Route>> {
-        return firebaseDataSource.getRoutesByUser(userId.toString())
+        return firebaseDataSource.getRoutesByUser(userId)
     }
 
     // ── Telemetria (Realtime Database) ───────────────────────────────────

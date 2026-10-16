@@ -115,8 +115,9 @@ class AuthRepository(
             user = userDao.getUserByFirebaseUid(uid)
                 ?: User(id = id, name = name, email = email, phone = phone, firebaseUid = uid)
         }
-        // Compartilha o ID local com a nuvem (mesma chave de documento no Firestore).
-        syncManager.syncUser(user)
+        // Envia ao Firestore a conta logada e todos os seus veículos (vinculados
+        // ao UID desta conta), para exibição no backend.
+        syncManager.syncAccountToCloud(user)
         return user
     }
 }

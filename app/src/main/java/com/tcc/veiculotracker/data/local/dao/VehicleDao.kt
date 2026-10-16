@@ -13,6 +13,10 @@ interface VehicleDao {
     @Query("SELECT * FROM vehicles WHERE id = :vehicleId LIMIT 1")
     fun getVehicleById(vehicleId: Long): Flow<Vehicle?>
 
+    // Bug 3/4 fix: leitura pontual (one-shot) pós-write, sem depender de emissão do Flow.
+    @Query("SELECT * FROM vehicles WHERE id = :vehicleId LIMIT 1")
+    suspend fun getVehicleByIdOnce(vehicleId: Long): Vehicle?
+
     @Query("SELECT * FROM vehicles WHERE userId = :userId")
     suspend fun getVehiclesListByUser(userId: Long): List<Vehicle>
 

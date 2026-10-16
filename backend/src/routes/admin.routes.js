@@ -11,6 +11,11 @@ import { asyncHandler } from '../middleware/error.js';
 import { HttpError } from '../util/http-error.js';
 import { serializeVehicle, serializeDevice } from './vehicles.routes.js';
 import { subscribeVehicle, publishToVehicle } from '../realtime/sse.js';
+import {
+  getSimulationDecision,
+  applySimulationDecision,
+} from '../services/simulation.service.js';
+import { importFromCloud } from '../services/cloud-import.service.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -149,5 +154,51 @@ router.get('/vehicles/:id/telemetry/stream', (req, res, next) => {
     },
   });
 });
+
+// ── Sincronização com o celular (Firestore) ─────────────────────────────
+//
+// Traz para o SQLite as contas/veículos que o app enviou ao Firestore, ligando
+// cada veículo ao dono e garantindo um rastreador REAL (model='app-tracker').
+// Assim o rastreador acompanha o veículo cadastrado pelo usuário, e não a frota
+// do simulador. Body opcional: { createTracker: false } para importar sem criar
+// o rastreador.
+router.post(
+  '/cloud/import',
+  asyncHandler(async (req, res) => {
+    const createTracker = req.body?.createTracker !== false;
+    const result = await importFromCloud({ createTracker });
+    res.json({ import: result });
+  })
+);
+
+// ── Simulação: seletor do painel ────────────────────────────────────────
+//
+// Lê a decisão de simulação de qualquer veículo (para montar o seletor).
+router.get(
+  '/vehicles/:id/simulation',
+  asyncHandler(async (req, res) => {
+    const v = getVehicleAny(req.params.id);
+    res.json({ simulation: getSimulationDecision(v) });
+  })
+);
+
+// Adiciona/tira qualquer veículo da simulação: { simulate: true | false }.
+// Mesmas regras do app; veículo com rastreador real não pode ser simulado.
+router.post(
+  '/vehicles/:id/simulation',
+  asyncHandler(async (req, res) => {
+    const v = getVehicleAny(req.params.id);
+    const simulate = req.body?.simulate;
+    if (typeof simulate !== 'boolean') {
+      throw new HttpError(400, 'Informe simulate: true (simular) ou false (teste real)');
+    }
+    const { vehicle, device } = applySimulationDecision(v, simulate);
+    res.json({
+      simulation: getSimulationDecision(vehicle),
+      vehicle: serializeVehicle(vehicle),
+      device: serializeDevice(device),
+    });
+  })
+);
 
 export default router;

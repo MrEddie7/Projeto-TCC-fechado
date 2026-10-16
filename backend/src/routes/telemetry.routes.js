@@ -38,7 +38,7 @@ router.get(
         : null,
       vehicle: {
         id: Number(v.id),
-        plateau: v.plate,
+        plate: v.plate,
         isBlocked: v.is_blocked === 1,
         lastUpdate: Number(v.last_update),
         latitude: v.latitude,

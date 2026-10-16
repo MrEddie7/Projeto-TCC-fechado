@@ -14,6 +14,8 @@ import { fileURLToPath } from 'node:url';
 import { db } from '../db/database.js';
 import { config } from '../config.js';
 import { getFirebase, getFirebaseInitError } from '../firebase/firebase-admin.js';
+import { readCloudAccounts, CLOUD_ID_BASE } from './firestore-read.service.js';
+import { getSimulationDecision } from './simulation.service.js';
 
 // Janela usada para considerar uma telemetria/localização "recente".
 const RECENT_MS = 5 * 60 * 1000;
@@ -116,6 +118,7 @@ function usersWithVehicles() {
       const last = db
         .prepare('SELECT * FROM telemetry WHERE vehicle_id = ? ORDER BY timestamp DESC LIMIT 1')
         .get(v.id);
+      const origin = v.origin || 'backend';
       return {
         id: Number(v.id),
         plate: v.plate,
@@ -126,11 +129,19 @@ function usersWithVehicles() {
         isBlocked: v.is_blocked === 1,
         // true = frota do simulador; false = teste real (fora da simulação).
         simulated: v.simulated === 1,
+        // 'backend' = nasceu na API/SQLite; 'firestore' = importado do celular.
+        origin,
+        // source espelha origin para que renderPhoneVehicles e renderSimulation do
+        // painel tratem corretamente os veículos importados do celular.
+        source: origin,
         latitude: v.latitude,
         longitude: v.longitude,
         speed: v.speed,
         lastUpdate: Number(v.last_update),
         online: Number(v.last_update) >= Date.now() - RECENT_MS,
+        // Decisão de simulação (para o seletor do painel): informa se o veículo
+        // pode entrar/sair do simulador e por quê.
+        simulation: getSimulationDecision(v),
         device: device
           ? {
               deviceId: device.device_id,
@@ -276,9 +287,148 @@ function screensHealth(c) {
   return screens;
 }
 
-export function buildOverview() {
+// ── Firestore: contas e veículos enviados pelo app ──────────────────────
+//
+// O app Android grava, vinculados à conta logada (Firebase Auth), o documento
+// da conta (users/{id}, com firebaseUid) e os veículos dessa conta
+// (vehicles/{id}, com ownerUid/ownerEmail). Aqui esses documentos são lidos e
+// mesclados ao painel quando ainda NÃO existem no SQLite (por exemplo, cadastro
+// feito no app antes de o backend entrar em cena). A leitura vem de
+// firestore-read.service.js. É somente leitura: nada é gravado de volta.
+//
+// Para trazer esses veículos de vez para o backend (com rastreador e controle de
+// simulação), o painel chama POST /v1/admin/cloud/import.
+
+function mapCloudUser(u) {
+  const cloudId = Number(u.docId);
+  return {
+    id: CLOUD_ID_BASE + (Number.isFinite(cloudId) ? cloudId : 0),
+    cloudId,
+    name: u.name || u.email || 'Conta do app',
+    email: u.email || '',
+    phone: u.phone || '',
+    createdAt: Number(u.createdAt) || 0,
+    realTest: false,
+    mobileLocation: null,
+    vehicles: [],
+    source: 'firestore',
+    origin: 'firestore',
+    firebaseUid: u.firebaseUid || null,
+  };
+}
+
+function mapCloudVehicle(v) {
+  const docId = Number(v.docId ?? v.id);
+  if (!Number.isFinite(docId)) return null;
+  return {
+    id: CLOUD_ID_BASE + docId,
+    cloudId: docId,
+    plate: v.plate || '',
+    brand: v.brand || '',
+    model: v.model || '',
+    year: Number(v.year) || 0,
+    color: v.color || '',
+    isBlocked: v.isBlocked === true,
+    simulated: false,
+    latitude: Number(v.latitude) || 0,
+    longitude: Number(v.longitude) || 0,
+    speed: Number(v.speed) || 0,
+    lastUpdate: Number(v.lastUpdate) || 0,
+    online: Number(v.lastUpdate) >= Date.now() - RECENT_MS,
+    device: null,
+    telemetry: null,
+    origin: 'firestore',
+    source: 'firestore',
+  };
+}
+
+/**
+ * Mescla as contas/veículos do Firestore na lista de usuários do painel.
+ * Um item só é adicionado quando ainda não existe no SQLite (dedupe por email
+ * para contas e por placa para veículos), então o que já veio pelo backend não
+ * aparece duplicado. Retorna o resumo para exibir no painel.
+ */
+function mergeCloudAccounts(users, cloud) {
+  const stats = { users: 0, vehicles: 0, error: cloud.error };
+  const emailKey = (value) => String(value || '').trim().toLowerCase();
+  const byEmail = new Map();
+  for (const u of users) {
+    const key = emailKey(u.email);
+    if (key) byEmail.set(key, u);
+  }
+
+  // 1. Contas do app que ainda não estão no SQLite viram entradas próprias.
+  const cloudUsersById = new Map();
+  for (const raw of cloud.users) {
+    const cloudUser = mapCloudUser(raw);
+    cloudUsersById.set(cloudUser.cloudId, cloudUser);
+    const key = emailKey(cloudUser.email);
+    if (key && byEmail.has(key)) continue; // conta já cadastrada no SQLite
+    users.push(cloudUser);
+    if (key) byEmail.set(key, cloudUser);
+    stats.users++;
+  }
+
+  // 2. Veículos do app que ainda não estão no SQLite, ligados ao dono.
+  const plates = new Set();
+  for (const u of users) {
+    for (const v of u.vehicles) plates.add(String(v.plate || '').trim().toUpperCase());
+  }
+
+  for (const raw of cloud.vehicles) {
+    const vehicle = mapCloudVehicle(raw);
+    if (!vehicle) continue;
+    const plate = vehicle.plate.trim().toUpperCase();
+    if (!plate || plates.has(plate)) continue; // já exibido a partir do SQLite
+    plates.add(plate);
+
+    // Dono: e-mail gravado no veículo pelo app; senão a conta da nuvem à qual o
+    // veículo pertence (userId -> users/{id}).
+    let owner = byEmail.get(emailKey(raw.ownerEmail));
+    if (!owner) {
+      const cloudOwner = cloudUsersById.get(Number(raw.userId));
+      owner = cloudOwner ? byEmail.get(emailKey(cloudOwner.email)) || cloudOwner : null;
+    }
+    if (!owner) {
+      // Dono sem correspondência: cria uma conta só-pela-nuvem para o veículo
+      // não sumir do painel.
+      const ownerCloudId = Number(raw.userId);
+      owner = {
+        id: CLOUD_ID_BASE + (Number.isFinite(ownerCloudId) ? ownerCloudId : 0),
+        cloudId: Number.isFinite(ownerCloudId) ? ownerCloudId : null,
+        name: raw.ownerEmail || 'Conta do app',
+        email: raw.ownerEmail || '',
+        phone: '',
+        createdAt: 0,
+        realTest: false,
+        mobileLocation: null,
+        vehicles: [],
+        source: 'firestore',
+        origin: 'firestore',
+      };
+      users.push(owner);
+      const key = emailKey(owner.email);
+      if (key) byEmail.set(key, owner);
+      stats.users++;
+    }
+
+    owner.vehicles.push({
+      ...vehicle,
+      owner: { id: owner.id, name: owner.name, email: owner.email },
+    });
+    stats.vehicles++;
+  }
+
+  return stats;
+}
+
+export async function buildOverview() {
   const c = counts();
   const users = usersWithVehicles();
+
+  // Acrescenta contas e veículos que o app enviou ao Firestore e que ainda não
+  // existem no SQLite do backend.
+  const inbound = mergeCloudAccounts(users, await readCloudAccounts());
 
   // Lista achatada de TODOS os veículos, com o dono embutido. É o que o mapa
   // do administrador usa para exibir a frota inteira (de todos os usuários).
@@ -289,12 +439,17 @@ export function buildOverview() {
     }
   }
 
+  // Veículos que vieram do celular (app -> Firestore): já importados no SQLite
+  // (origin='firestore', com rastreador) ou ainda só na nuvem (source='firestore').
+  const phoneVehicles = vehicles.filter((v) => v.origin === 'firestore');
+
   return {
     service: serviceInfo(),
-    counts: c,
-    sync: syncInfo(),
+    counts: { ...c, phoneVehicles: phoneVehicles.length },
+    sync: { ...syncInfo(), inbound },
     users,
     vehicles,
+    phoneVehicles,
     screens: screensHealth(c),
   };
 }

@@ -318,6 +318,9 @@
                screens:[...] }
    O array `vehicles` é a frota inteira achatada (todos os usuários), com o
    dono embutido — usado pelo mapa para desenhar a frota completa.
+   Além do SQLite, o overview lê do Firestore as contas/veículos enviados pelo
+   APP e mescla o que ainda não existe no backend (dedupe por email/placa; ids
+   da nuvem deslocados +1e9 para não colidir). Resumo em sync.inbound.
 
 
 ================================================================================
@@ -389,6 +392,7 @@
  espelha o SQLite no projeto Firebase do app ("securitas-ce0bd").
 
  Firestore (instância "securitas") - dados estruturados:
+  Escrita do backend (SQLite -> nuvem, firebase-sync.service.js):
    users/{id}.set     { name, email, phone, createdAt }
    vehicles/{id}.set  { id, userId, plate, model, brand, year, color,
                         isBlocked, latitude, longitude, speed, lastUpdate,
@@ -396,6 +400,14 @@
    routes/{id}.set    { id, vehicleId, userId, startLatitude, startLongitude,
                         endLatitude, endLongitude, startTime, endTime,
                         distance, maxSpeed, status }
+
+  Escrita do APP (conta logada -> nuvem, FirebaseDataSource) - vinculada ao
+  Firebase Auth da conta que cadastrou. Mesmas coleções, campos a mais:
+   users/{id}.set     { name, email, phone, createdAt, firebaseUid }
+   vehicles/{id}.set  { ...os mesmos campos..., ownerUid, ownerEmail }
+  O app envia a conta logada + TODOS os seus veículos ao entrar (login/
+  registro) e mantém write-through a cada cadastro/edição/bloqueio/exclusão,
+  inclusive quando o backend REST está configurado.
 
  Realtime Database - baixa latência:
    telemetry/{vehicleId}.set { latitude, longitude, speed, heading, timestamp }
@@ -413,9 +425,10 @@
  Fontes: src/services/firebase-sync.service.js + src/firebase/firebase-admin.js.
 
  IMPORTANTE (documentado no PROXIMOS_PASSOS):
- - A identidade usada é o userId NUMÉRICO do banco do backend. Para o app
-   Android enxergar a mesma dados, o usuário local do app deve ter o MESMO id
-   (ou mapear no sync). Está pendente alinhar esse mapeamento.
+ - O backend usa o userId NUMÉRICO do seu banco como identidade. O app agora
+   envia também a conta do Firebase Auth (firebaseUid no doc do usuário e
+   ownerUid/ownerEmail no doc do veículo), o que permite ao painel atribuir
+   cada usuário/veículo à conta do app mesmo sem o id numérico bater.
  - google-services.json (do app) NÃO funciona no Admin SDK; o backend precisa
    da chave privada (service account) em firebase-service-account.json.
 
@@ -506,6 +519,11 @@
    Firestore  routes    -> origem, destino, distancia, velocidade maxima
    RTDB       telemetry -> ultima posicao de cada veiculo (telemetry/<id>)
    RTDB       commands  -> comandos pendentes por veiculo (commands/<id>)
+
+ No sentido inverso, o APP Android tambem grava no Firestore (FirebaseDataSource):
+ a conta logada (users/{id} + firebaseUid) e os veiculos dela (vehicles/{id} +
+ ownerUid/ownerEmail), ao entrar e a cada alteracao. O painel do admin le essas
+ colecoes e mescla ao SQLite (overview.service.js), exibindo o que veio do app.
 
  ATENCAO: a senha nunca vai para o Firebase. O espelho de "users" e apenas
  de dados; nao ha login via Firebase Auth. A senha local usa scrypt, e o
