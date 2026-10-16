@@ -3,6 +3,7 @@ import { createApp } from './app.js';
 import { db } from './db/database.js';
 import { startFirebaseSync } from './services/firebase-sync.service.js';
 import { startVehicleSimulation } from './services/simulation.service.js';
+import { importFromCloud } from './services/cloud-import.service.js';
 
 const app = createApp();
 
@@ -19,6 +20,26 @@ app.listen(config.port, () => {
   console.log(`  Doc (TXT)     : backend/API_ESTRUTURA.txt`);
   console.log('==================================================');
   console.log(`  Banco: ${config.dbPath}`);
+
+  // Importa automaticamente as contas/veículos que o app enviou ao Firestore
+  // para o SQLite, sem bloquear o boot. Só executa se o Firebase estiver ativo.
+  if (config.firebaseSyncEnabled) {
+    importFromCloud({ createTracker: true })
+      .then((stats) => {
+        if (stats.error) {
+          console.warn('[boot] importFromCloud: Firestore indisponível —', stats.error);
+        } else {
+          console.log(
+            `[boot] importFromCloud: ${stats.accounts} conta(s) · ` +
+            `${stats.cloudVehicles} veículo(s) no Firestore · ` +
+            `${stats.usersCreated} usuário(s) criado(s) · ` +
+            `${stats.vehiclesCreated} veículo(s) importado(s) · ` +
+            `${stats.trackersCreated} rastreador(es) criado(s)`
+          );
+        }
+      })
+      .catch((e) => console.warn('[boot] importFromCloud erro:', e.message));
+  }
 });
 
 // Encerramento gracioso (fecha o SQLite corretamente)

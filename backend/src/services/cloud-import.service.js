@@ -79,15 +79,20 @@ function ensureVehicle(owner, cloudVehicle, stats, { createTracker }) {
 
   if (!vehicle) {
     const now = Date.now();
-    const info = db
-      .prepare(
-        `INSERT INTO vehicles
-           (user_id, plate, model, brand, year, color, is_blocked,
-            latitude, longitude, speed, last_update, simulated, origin, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'firestore', ?, 0)`
-      )
-      .run(
-        owner.id,
+    // Tenta usar o id original do Firestore como id no SQLite para manter
+    // consistência com os documentos já existentes (evita id drift).
+    const desiredId = Number(cloudVehicle.docId ?? cloudVehicle.id);
+    const existing = Number.isFinite(desiredId) && desiredId > 0
+      ? db.prepare('SELECT * FROM vehicles WHERE id = ?').get(desiredId)
+      : null;
+
+    if (existing && existing.user_id === owner.id) {
+      // Já existe com o mesmo id e dono — apenas atualiza metadados.
+      db.prepare(
+        `UPDATE vehicles SET plate=?, model=?, brand=?, year=?, color=?, is_blocked=?,
+         latitude=?, longitude=?, speed=?, last_update=?, updated_at=0
+         WHERE id=?`
+      ).run(
         plate,
         String(cloudVehicle.model || '').trim() || '—',
         String(cloudVehicle.brand || '').trim() || '—',
@@ -98,10 +103,39 @@ function ensureVehicle(owner, cloudVehicle, stats, { createTracker }) {
         Number(cloudVehicle.longitude) || 0,
         Number(cloudVehicle.speed) || 0,
         Number(cloudVehicle.lastUpdate) || 0,
-        Number(cloudVehicle.createdAt) || now
+        desiredId
       );
-    vehicle = db.prepare('SELECT * FROM vehicles WHERE id = ?').get(Number(info.lastInsertRowid));
-    stats.vehiclesCreated++;
+      vehicle = db.prepare('SELECT * FROM vehicles WHERE id = ?').get(desiredId);
+    } else {
+      const info = db
+        .prepare(
+          `INSERT INTO vehicles
+             (user_id, plate, model, brand, year, color, is_blocked,
+              latitude, longitude, speed, last_update, simulated, origin, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'firestore', ?, 0)`
+        )
+        .run(
+          owner.id,
+          plate,
+          String(cloudVehicle.model || '').trim() || '—',
+          String(cloudVehicle.brand || '').trim() || '—',
+          Number(cloudVehicle.year) || 0,
+          String(cloudVehicle.color || '').trim(),
+          cloudVehicle.isBlocked === true ? 1 : 0,
+          Number(cloudVehicle.latitude) || 0,
+          Number(cloudVehicle.longitude) || 0,
+          Number(cloudVehicle.speed) || 0,
+          Number(cloudVehicle.lastUpdate) || 0,
+          Number(cloudVehicle.createdAt) || now
+        );
+      vehicle = db.prepare('SELECT * FROM vehicles WHERE id = ?').get(Number(info.lastInsertRowid));
+      stats.vehiclesCreated++;
+    }
+  } else {
+    // Veículo já existe — garante que updated_at=0 para não reenviar ao Firestore.
+    if (Number(vehicle.updated_at) > 0) {
+      db.prepare("UPDATE vehicles SET updated_at=0 WHERE id=?").run(vehicle.id);
+    }
   }
 
   if (createTracker) ensureTracker(vehicle, stats);

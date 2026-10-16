@@ -41,11 +41,32 @@ export async function readCloudAccounts({ force = false } = {}) {
       fb.firestore.collection('users').get(),
       fb.firestore.collection('vehicles').get(),
     ]);
-    const data = {
-      users: usersSnap.docs.map((d) => ({ docId: d.id, ...d.data() })),
-      vehicles: vehiclesSnap.docs.map((d) => ({ docId: d.id, ...d.data() })),
-      error: null,
-    };
+
+    // Indexa usuários por docId para enriquecer veículos sem ownerEmail/ownerUid.
+    // O app grava userId (numérico do Room) nos veículos mas pode omitir ownerEmail
+    // quando o usuário ainda não está logado no Firebase Auth.
+    const usersByDocId = new Map();
+    const users = usersSnap.docs.map((d) => {
+      const u = { docId: d.id, ...d.data() };
+      usersByDocId.set(String(d.id), u);
+      return u;
+    });
+
+    const vehicles = vehiclesSnap.docs.map((d) => {
+      const v = { docId: d.id, ...d.data() };
+      // Enriquece com ownerEmail caso esteja ausente mas userId aponte para um
+      // documento de usuário conhecido no mesmo Firestore.
+      if (!v.ownerEmail && !v.ownerUid && v.userId != null) {
+        const ownerDoc = usersByDocId.get(String(v.userId));
+        if (ownerDoc) {
+          v.ownerEmail = ownerDoc.email || v.ownerEmail;
+          v.ownerUid   = ownerDoc.firebaseUid || v.ownerUid;
+        }
+      }
+      return v;
+    });
+
+    const data = { users, vehicles, error: null };
     cloudCache = { at: Date.now(), data };
     return data;
   } catch (e) {
