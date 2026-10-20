@@ -5,16 +5,16 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.tcc.veiculotracker.App
-import com.tcc.veiculotracker.data.local.entity.Route
-import com.tcc.veiculotracker.data.local.entity.RoutePoint
+import com.tcc.veiculotracker.data.model.RouteModel
+import com.tcc.veiculotracker.data.model.RoutePointModel
 import com.tcc.veiculotracker.util.Constants
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 data class HistoryState(
-    val routes: List<Route> = emptyList(),
-    val selectedRoute: Route? = null,
-    val routePoints: List<RoutePoint> = emptyList(),
+    val routes: List<RouteModel> = emptyList(),
+    val selectedRoute: RouteModel? = null,
+    val routePoints: List<RoutePointModel> = emptyList(),
     val isLoading: Boolean = true
 )
 
@@ -40,16 +40,15 @@ class RouteHistoryViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
-    fun selectRoute(route: Route) {
+    fun selectRoute(route: RouteModel) {
         _state.value = _state.value.copy(selectedRoute = route)
         viewModelScope.launch {
-            routeRepository.getRoutePoints(route.id).collect { points ->
-                _state.value = _state.value.copy(routePoints = points)
-            }
+            val points = routeRepository.getRoutePoints(route.id)
+            _state.value = _state.value.copy(routePoints = points)
         }
     }
 
-    fun deleteRoute(route: Route) {
+    fun deleteRoute(route: RouteModel) {
         viewModelScope.launch {
             routeRepository.deleteRoute(route)
             _state.value = _state.value.copy(selectedRoute = null, routePoints = emptyList())

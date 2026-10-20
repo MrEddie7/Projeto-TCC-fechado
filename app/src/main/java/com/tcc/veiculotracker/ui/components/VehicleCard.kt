@@ -9,13 +9,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.tcc.veiculotracker.data.local.entity.Vehicle
+import com.tcc.veiculotracker.data.model.VehicleModel
 import com.tcc.veiculotracker.ui.theme.Active
 import com.tcc.veiculotracker.ui.theme.Blocked
 
 @Composable
 fun VehicleCard(
-    vehicle: Vehicle,
+    vehicle: VehicleModel,
     onClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {

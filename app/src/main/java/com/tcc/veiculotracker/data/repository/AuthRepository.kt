@@ -1,87 +1,85 @@
 package com.tcc.veiculotracker.data.repository
 
+import android.content.Context
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
 import com.google.firebase.auth.FirebaseAuthInvalidUserException
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.UserProfileChangeRequest
-import com.tcc.veiculotracker.data.local.dao.UserDao
-import com.tcc.veiculotracker.data.local.entity.User
+import com.tcc.veiculotracker.data.model.UserModel
 import com.tcc.veiculotracker.data.sync.SyncManager
-import kotlinx.coroutines.flow.Flow
+import com.tcc.veiculotracker.util.Constants
 import kotlinx.coroutines.tasks.await
 
+/**
+ * Gerencia autenticação via Firebase Auth (email/senha e Google).
+ * O Room foi removido — o perfil do usuário vive no Firestore e os campos
+ * essenciais (id, nome, email) são mantidos em SharedPreferences para acesso
+ * imediato sem I/O.
+ *
+ * A "identidade local" é derivada diretamente do FirebaseUser retornado após
+ * o login, sem banco local intermediário.
+ */
 class AuthRepository(
-    private val userDao: UserDao,
+    private val context: Context,
     private val syncManager: SyncManager
 ) {
-
     private val firebaseAuth = FirebaseAuth.getInstance()
+    private val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
 
-    // ── Google Sign-In ───────────────────────────────────────────────────
+    // ── Google Sign-In ────────────────────────────────────────────────────────
 
-    /**
-     * Autentica com o Firebase usando o ID token do Google (Credential Manager)
-     * e garante que o usuário exista no banco local (Room), vinculado ao UID.
-     */
-    suspend fun signInWithGoogle(idToken: String): User {
+    suspend fun signInWithGoogle(idToken: String): UserModel {
         val credential = GoogleAuthProvider.getCredential(idToken, null)
         val authResult = firebaseAuth.signInWithCredential(credential).await()
-        val firebaseUser = authResult.user ?: throw IllegalStateException("Usuário do Firebase não encontrado")
-        return upsertLocalUser(
-            uid = firebaseUser.uid,
+        val firebaseUser = authResult.user
+            ?: throw IllegalStateException("Usuário do Firebase não encontrado")
+        return buildAndPersistUser(
+            uid   = firebaseUser.uid,
             email = firebaseUser.email ?: "",
-            name = firebaseUser.displayName?.takeIf { it.isNotBlank() } ?: "Usuário",
+            name  = firebaseUser.displayName?.takeIf { it.isNotBlank() } ?: "Usuário",
             phone = firebaseUser.phoneNumber ?: ""
         )
     }
 
-    // ── Email/Senha (provedor Email/Password do Firebase) ───────────────
+    // ── Email/Senha ───────────────────────────────────────────────────────────
 
-    /**
-     * Cria uma conta real no Firebase Authentication e vincula ao usuário local.
-     */
     suspend fun registerWithEmail(
         name: String,
         email: String,
         password: String,
         phone: String
-    ): User {
+    ): UserModel {
         val authResult = firebaseAuth.createUserWithEmailAndPassword(email, password).await()
-        val firebaseUser = authResult.user ?: throw IllegalStateException("Usuário do Firebase não encontrado")
+        val firebaseUser = authResult.user
+            ?: throw IllegalStateException("Usuário do Firebase não encontrado")
         firebaseUser.updateProfile(
             UserProfileChangeRequest.Builder().setDisplayName(name).build()
         ).await()
-        return upsertLocalUser(
-            uid = firebaseUser.uid,
+        return buildAndPersistUser(
+            uid   = firebaseUser.uid,
             email = email,
-            name = name,
+            name  = name,
             phone = phone
         )
     }
 
-    /**
-     * Login por email/senha via Firebase. Retorna null se as credenciais forem inválidas.
-     */
-    suspend fun signInWithEmail(email: String, password: String): User? {
+    suspend fun signInWithEmail(email: String, password: String): UserModel? {
         return try {
             val authResult = firebaseAuth.signInWithEmailAndPassword(email, password).await()
             val firebaseUser = authResult.user ?: return null
-            upsertLocalUser(
-                uid = firebaseUser.uid,
+            buildAndPersistUser(
+                uid   = firebaseUser.uid,
                 email = firebaseUser.email ?: email,
-                name = firebaseUser.displayName?.takeIf { it.isNotBlank() }
-                    ?: email.substringBefore("@"),
+                name  = firebaseUser.displayName?.takeIf { it.isNotBlank() }
+                            ?: email.substringBefore("@"),
                 phone = firebaseUser.phoneNumber ?: ""
             )
-        } catch (e: FirebaseAuthInvalidUserException) {
-            null
-        } catch (e: FirebaseAuthInvalidCredentialsException) {
-            null
-        }
+        } catch (e: FirebaseAuthInvalidUserException)        { null }
+          catch (e: FirebaseAuthInvalidCredentialsException) { null }
     }
 
-    // ── Sessão / perfil ─────────────────────────────────────────────────
+    // ── Sessão / perfil ───────────────────────────────────────────────────────
 
     suspend fun signOut() {
         firebaseAuth.signOut()
@@ -90,34 +88,50 @@ class AuthRepository(
     val currentFirebaseUid: String?
         get() = firebaseAuth.currentUser?.uid
 
-    fun getUserById(userId: Long): Flow<User?> {
-        return userDao.getUserById(userId)
+    /** Retorna o UserModel do usuário atualmente logado a partir das prefs. */
+    fun currentUser(): UserModel? {
+        val uid = prefs.getString(Constants.KEY_FIREBASE_UID, null) ?: return null
+        return UserModel(
+            id          = prefs.getLong(Constants.KEY_USER_ID, 0),
+            firebaseUid = uid,
+            name        = prefs.getString(Constants.KEY_USER_NAME, "") ?: "",
+            email       = prefs.getString(Constants.KEY_USER_EMAIL, "") ?: "",
+            phone       = ""
+        )
     }
 
-    suspend fun updateUser(user: User) {
-        userDao.update(user)
+    suspend fun updateUser(user: UserModel) {
+        saveUserPrefs(user)
         syncManager.syncUser(user)
     }
 
-    // ── Suporte interno ─────────────────────────────────────────────────
+    // ── Suporte interno ───────────────────────────────────────────────────────
 
-    private suspend fun upsertLocalUser(
-        uid: String,
-        email: String,
-        name: String,
-        phone: String
-    ): User {
-        var user = userDao.getUserByFirebaseUid(uid)
-        if (user == null) {
-            val id = userDao.insert(
-                User(name = name, email = email, phone = phone, firebaseUid = uid)
-            )
-            user = userDao.getUserByFirebaseUid(uid)
-                ?: User(id = id, name = name, email = email, phone = phone, firebaseUid = uid)
-        }
-        // Envia ao Firestore a conta logada e todos os seus veículos (vinculados
-        // ao UID desta conta), para exibição no backend.
+    private suspend fun buildAndPersistUser(
+        uid: String, email: String, name: String, phone: String
+    ): UserModel {
+        // Usa o hashCode do UID como ID numérico estável (evita Room autoincrement).
+        val id = uid.hashCode().toLong().let { if (it < 0) -it else it }
+        val user = UserModel(
+            id          = id,
+            firebaseUid = uid,
+            email       = email,
+            name        = name,
+            phone       = phone
+        )
+        saveUserPrefs(user)
+        // Grava no Firestore e envia os veículos da conta.
         syncManager.syncAccountToCloud(user)
         return user
+    }
+
+    private fun saveUserPrefs(user: UserModel) {
+        prefs.edit().apply {
+            putLong(Constants.KEY_USER_ID, user.id)
+            putString(Constants.KEY_FIREBASE_UID, user.firebaseUid)
+            putString(Constants.KEY_USER_NAME, user.name)
+            putString(Constants.KEY_USER_EMAIL, user.email)
+            apply()
+        }
     }
 }

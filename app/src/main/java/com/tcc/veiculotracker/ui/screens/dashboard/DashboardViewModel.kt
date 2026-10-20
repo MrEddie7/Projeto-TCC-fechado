@@ -5,7 +5,7 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.tcc.veiculotracker.App
-import com.tcc.veiculotracker.data.local.entity.Vehicle
+import com.tcc.veiculotracker.data.model.VehicleModel
 import com.tcc.veiculotracker.util.Constants
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -15,7 +15,7 @@ data class DashboardState(
     val totalVehicles: Int = 0,
     val activeVehicles: Int = 0,
     val blockedVehicles: Int = 0,
-    val vehicles: List<Vehicle> = emptyList(),
+    val vehicles: List<VehicleModel> = emptyList(),
     val isLoading: Boolean = true
 )
 
@@ -31,12 +31,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     val userId: Long get() = prefs.getLong(Constants.KEY_USER_ID, -1)
 
     init {
-        // Bug 9 fix: havia dois blocos launch independentes executando o mesmo
-        // push/sync em paralelo, criando race condition no vehicleDao e chamadas
-        // duplicadas ao backend/Firebase. Unificado em um único bloco sequencial.
         viewModelScope.launch {
-            // Reenvia a conta logada + veículos ao Firestore ao abrir o app com
-            // sessão já ativa (inclusive se o envio falhou no login).
             if (userId > 0) runCatching { syncManager.syncAccountToCloud(userId) }
             val backend = (application as App).backendRepository
             if (backend.isConfigured && userId > 0) {
@@ -56,11 +51,11 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             vehicleRepository.getVehiclesByUser(userId).collect { vehicles ->
                 _state.value = _state.value.copy(
-                    vehicles = vehicles,
-                    totalVehicles = vehicles.size,
-                    activeVehicles = vehicles.count { !it.isBlocked },
+                    vehicles        = vehicles,
+                    totalVehicles   = vehicles.size,
+                    activeVehicles  = vehicles.count { !it.isBlocked },
                     blockedVehicles = vehicles.count { it.isBlocked },
-                    isLoading = false
+                    isLoading       = false
                 )
             }
         }

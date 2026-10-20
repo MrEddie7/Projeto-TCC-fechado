@@ -5,18 +5,15 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.tcc.veiculotracker.App
-import com.tcc.veiculotracker.data.local.entity.ApiConfig
 import com.tcc.veiculotracker.util.Constants
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 data class ApiLinkState(
-    val configs: List<ApiConfig> = emptyList(),
-    val activeConfig: ApiConfig? = null,
+    val apiUrl: String = "",
     val isSaving: Boolean = false,
     val saved: Boolean = false,
-    val error: String? = null,
-    val isLoading: Boolean = true
+    val error: String? = null
 )
 
 class ApiLinkViewModel(application: Application) : AndroidViewModel(application) {
@@ -27,23 +24,8 @@ class ApiLinkViewModel(application: Application) : AndroidViewModel(application)
     private val _state = MutableStateFlow(ApiLinkState())
     val state: StateFlow<ApiLinkState> = _state
 
-    private val userId: Long get() = prefs.getLong(Constants.KEY_USER_ID, -1)
-
     init {
-        loadConfigs()
-    }
-
-    private fun loadConfigs() {
-        viewModelScope.launch {
-            repository.getConfigsByUser(userId).collect { configs ->
-                _state.value = _state.value.copy(configs = configs, isLoading = false)
-            }
-        }
-        viewModelScope.launch {
-            repository.getActiveConfig(userId).collect { config ->
-                _state.value = _state.value.copy(activeConfig = config)
-            }
-        }
+        _state.value = _state.value.copy(apiUrl = repository.apiUrl)
     }
 
     fun saveConfig(apiUrl: String, apiKey: String) {
@@ -51,37 +33,15 @@ class ApiLinkViewModel(application: Application) : AndroidViewModel(application)
             _state.value = _state.value.copy(error = "A URL da API é obrigatória")
             return
         }
-
-        viewModelScope.launch {
-            _state.value = _state.value.copy(isSaving = true, error = null)
-            try {
-                val config = ApiConfig(
-                    userId = userId,
-                    apiUrl = apiUrl.trim(),
-                    apiKey = apiKey.trim(),
-                    isActive = _state.value.configs.isEmpty()
-                )
-                repository.saveConfig(config)
-                _state.value = _state.value.copy(isSaving = false, saved = true)
-            } catch (e: Exception) {
-                _state.value = _state.value.copy(
-                    isSaving = false,
-                    error = e.message ?: "Erro ao salvar configuração"
-                )
-            }
-        }
+        _state.value = _state.value.copy(isSaving = true, error = null)
+        repository.apiUrl   = apiUrl.trim()
+        repository.apiToken = apiKey.trim()
+        _state.value = _state.value.copy(isSaving = false, saved = true, apiUrl = apiUrl.trim())
     }
 
-    fun setActiveConfig(config: ApiConfig) {
-        viewModelScope.launch {
-            repository.setActiveConfig(userId, config.id)
-        }
-    }
-
-    fun deleteConfig(config: ApiConfig) {
-        viewModelScope.launch {
-            repository.deleteConfig(config)
-        }
+    fun clearConfig() {
+        repository.clear()
+        _state.value = ApiLinkState()
     }
 
     fun clearMessages() {

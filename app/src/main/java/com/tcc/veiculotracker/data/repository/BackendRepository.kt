@@ -2,23 +2,17 @@ package com.tcc.veiculotracker.data.repository
 
 import android.content.Context
 import android.util.Log
-import com.tcc.veiculotracker.data.local.dao.VehicleDao
-import com.tcc.veiculotracker.data.local.entity.Vehicle
+import com.tcc.veiculotracker.data.model.VehicleModel
 import com.tcc.veiculotracker.data.remote.ApiClient
 import com.tcc.veiculotracker.util.Constants
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 
 /**
  * Repositório que gerencia a comunicação com o backend Node.js.
- * 
- * O backend é a ponte entre o app e o hardware rastreador (GPS IoT).
- * Este repositório sincroniza os dados locais (Room) com o backend,
- * garantindo que os comandos cheguem ao hardware e a telemetria chegue ao app.
+ * Room foi removido — não há mais DAO. Os veículos retornados pelo backend
+ * são passados diretamente ao Firestore via SyncManager (VehicleRepository).
  */
 class BackendRepository(
-    private val context: Context,
-    private val vehicleDao: VehicleDao
+    private val context: Context
 ) {
     val apiClient: ApiClient = ApiClient(context)
     private val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
@@ -27,7 +21,7 @@ class BackendRepository(
         private const val TAG = "BackendRepository"
     }
 
-    // ── Configuração ──────────────────────────────────────────────────────
+    // ── Configuração ──────────────────────────────────────────────────────────
 
     var baseUrl: String
         get() = apiClient.baseUrl
@@ -36,26 +30,20 @@ class BackendRepository(
     val isConfigured: Boolean
         get() = apiClient.isConfigured
 
-    fun saveAuthToken(token: String) {
-        apiClient.authToken = token
-    }
+    fun saveAuthToken(token: String) { apiClient.authToken = token }
+    fun clearAuthToken()             { apiClient.authToken = null  }
 
-    fun clearAuthToken() {
-        apiClient.authToken = null
-    }
-
-    // ── Auth ──────────────────────────────────────────────────────────────
+    // ── Auth ──────────────────────────────────────────────────────────────────
 
     suspend fun register(name: String, email: String, password: String, phone: String): Result<ApiClient.UserDto> {
         val result = apiClient.register(name, email, password, phone)
         result.onSuccess { auth ->
             apiClient.authToken = auth.token
-            // Bug 5 fix: grava o ID do backend em KEY_BACKEND_USER_ID, não em KEY_USER_ID.
-            // KEY_USER_ID é reservado para o ID do Room local (usado pelo VehicleRepository
-            // para filtrar veículos). Sobrescrevê-lo com o ID do backend causava lista vazia.
-            prefs.edit().putLong(Constants.KEY_BACKEND_USER_ID, auth.user.id).apply()
-            prefs.edit().putString(Constants.KEY_USER_NAME, auth.user.name).apply()
-            prefs.edit().putString(Constants.KEY_USER_EMAIL, auth.user.email).apply()
+            prefs.edit()
+                .putLong(Constants.KEY_BACKEND_USER_ID, auth.user.id)
+                .putString(Constants.KEY_USER_NAME, auth.user.name)
+                .putString(Constants.KEY_USER_EMAIL, auth.user.email)
+                .apply()
         }
         return result.map { it.user }
     }
@@ -64,10 +52,11 @@ class BackendRepository(
         val result = apiClient.login(email, password)
         result.onSuccess { auth ->
             apiClient.authToken = auth.token
-            // Bug 5 fix: mesmo motivo — ID do backend separado do ID Room.
-            prefs.edit().putLong(Constants.KEY_BACKEND_USER_ID, auth.user.id).apply()
-            prefs.edit().putString(Constants.KEY_USER_NAME, auth.user.name).apply()
-            prefs.edit().putString(Constants.KEY_USER_EMAIL, auth.user.email).apply()
+            prefs.edit()
+                .putLong(Constants.KEY_BACKEND_USER_ID, auth.user.id)
+                .putString(Constants.KEY_USER_NAME, auth.user.name)
+                .putString(Constants.KEY_USER_EMAIL, auth.user.email)
+                .apply()
         }
         return result.map { it.user }
     }
@@ -76,218 +65,110 @@ class BackendRepository(
         val result = apiClient.logout()
         result.onSuccess {
             clearAuthToken()
-            prefs.edit().remove(Constants.KEY_BACKEND_USER_ID).apply()
-            prefs.edit().remove(Constants.KEY_USER_NAME).apply()
-            prefs.edit().remove(Constants.KEY_USER_EMAIL).apply()
+            prefs.edit()
+                .remove(Constants.KEY_BACKEND_USER_ID)
+                .remove(Constants.KEY_USER_NAME)
+                .remove(Constants.KEY_USER_EMAIL)
+                .apply()
         }
         return result
     }
 
-    // ── Veículos ──────────────────────────────────────────────────────────
+    // ── Veículos ──────────────────────────────────────────────────────────────
 
     /**
-     * Sincroniza os veículos do backend com o banco local (Room).
-     * Veículos já existentes localmente são atualizados; novos são inseridos.
+     * Retorna os veículos do backend como lista de VehicleModel.
+     * O caller (VehicleRepository) decide o que fazer com eles (ex: mandar ao Firestore).
      */
     suspend fun syncVehiclesFromBackend(): Result<Int> {
         return apiClient.getVehicles().map { remoteVehicles ->
-            var synced = 0
-            for (remote in remoteVehicles) {
-                val local = vehicleDao.getVehicleById(remote.id).first()
-                if (local == null) {
-                    vehicleDao.insert(remote.toEntity())
-                    synced++
-                } else {
-                    vehicleDao.update(remote.toEntity())
-                    synced++
-                }
-            }
-            Log.d(TAG, "Sincronizados $synced veículos do backend")
-            synced
+            Log.d(TAG, "Veículos obtidos do backend: ${remoteVehicles.size}")
+            remoteVehicles.size
         }
     }
 
-    /**
-     * Cria um veículo no backend e localmente.
-     */
-    suspend fun createVehicle(plate: String, model: String, brand: String, year: Int, color: String): Result<Vehicle> {
-        return apiClient.createVehicle(plate, model, brand, year, color).map { dto ->
-            val vehicle = dto.toEntity()
-            vehicleDao.insert(vehicle)
-            vehicle
-        }
+    suspend fun getVehiclesFromBackend(): Result<List<VehicleModel>> {
+        return apiClient.getVehicles().map { list -> list.map { it.toModel() } }
     }
 
-    /**
-     * Envia para o backend os veículos que existem APENAS localmente (por
-     * exemplo, cadastrados antes de o backend estar configurado). Assim eles
-     * também aparecem no painel do administrador. É best-effort: veículos cujo
-     * cadastro no backend falhar continuam apenas locais e são tentados de novo
-     * na próxima sincronização. Veículos cuja placa já existe no backend são
-     * ignorados (o backend rejeitaria placa duplicada).
-     */
+    suspend fun createVehicle(plate: String, model: String, brand: String, year: Int, color: String): Result<VehicleModel> {
+        return apiClient.createVehicle(plate, model, brand, year, color).map { it.toModel() }
+    }
+
     suspend fun pushLocalVehiclesToBackend(userId: Long): Result<Int> {
-        return apiClient.getVehicles().map { remote ->
-            val remotePlates = remote.map { it.plate.uppercase() }.toSet()
-            val locals = vehicleDao.getVehiclesListByUser(userId)
-            var pushed = 0
-            for (local in locals) {
-                if (local.plate.uppercase() in remotePlates) continue
-                apiClient.createVehicle(local.plate, local.model, local.brand, local.year, local.color)
-                    .onSuccess { dto ->
-                        // Substitui a versão local pelo registro do backend, já
-                        // com o id do servidor (mesma placa/dados).
-                        vehicleDao.delete(local)
-                        vehicleDao.insert(dto.toEntity())
-                        pushed++
-                    }
-            }
-            Log.d(TAG, "Enviados $pushed veículo(s) local(is) para o backend")
-            pushed
-        }
+        // Sem Room não há "veículos apenas locais" — o Firestore é a fonte.
+        // Esta operação é no-op; fica para compatibilidade com SyncManager.
+        return Result.success(0)
     }
 
-    /**
-     * Atualiza um veículo no backend e localmente.
-     */
-    suspend fun updateVehicle(vehicle: Vehicle): Result<Vehicle> {
-        val updates = mutableMapOf<String, Any>()
-        updates["plate"] = vehicle.plate
-        updates["model"] = vehicle.model
-        updates["brand"] = vehicle.brand
-        updates["year"] = vehicle.year
-        updates["color"] = vehicle.color
+    suspend fun updateVehicle(vehicle: VehicleModel): Result<VehicleModel> {
+        val updates = mutableMapOf<String, Any>(
+            "plate" to vehicle.plate,
+            "model" to vehicle.model,
+            "brand" to vehicle.brand,
+            "year"  to vehicle.year,
+            "color" to vehicle.color
+        )
         return updateVehicle(vehicle.id, updates)
     }
 
-    /**
-     * Atualiza campos específicos de um veículo no backend e localmente.
-     * Usado, por exemplo, ao bloquear/desbloquear o veículo.
-     */
-    suspend fun updateVehicle(vehicleId: Long, updates: Map<String, Any>): Result<Vehicle> {
-        return apiClient.updateVehicle(vehicleId, updates).map { dto ->
-            val updated = dto.toEntity()
-            vehicleDao.update(updated)
-            updated
-        }
+    suspend fun updateVehicle(vehicleId: Long, updates: Map<String, Any>): Result<VehicleModel> {
+        return apiClient.updateVehicle(vehicleId, updates).map { it.toModel() }
     }
 
-    /**
-     * Remove um veículo do backend e localmente.
-     */
     suspend fun deleteVehicle(vehicleId: Long): Result<Boolean> {
-        return apiClient.deleteVehicle(vehicleId).map { ok ->
-            vehicleDao.getVehicleById(vehicleId).first()?.let { vehicleDao.delete(it) }
-            ok
-        }
+        return apiClient.deleteVehicle(vehicleId)
     }
 
-    // ── Simulação do veículo ──────────────────────────────────────────────
+    // ── Simulação ─────────────────────────────────────────────────────────────
 
-    /**
-     * Pergunta ao backend se o veículo deve entrar na frota simulada.
-     */
-    suspend fun getSimulationDecision(vehicleId: Long): Result<ApiClient.SimulationDecisionDto> {
-        return apiClient.getSimulationDecision(vehicleId)
-    }
+    suspend fun getSimulationDecision(vehicleId: Long): Result<ApiClient.SimulationDecisionDto> =
+        apiClient.getSimulationDecision(vehicleId)
 
-    /**
-     * Informa ao backend a escolha do usuário sobre a simulação.
-     */
-    suspend fun setVehicleSimulation(vehicleId: Long, simulate: Boolean): Result<ApiClient.SimulationDecisionDto> {
-        return apiClient.setVehicleSimulation(vehicleId, simulate)
-    }
+    suspend fun setVehicleSimulation(vehicleId: Long, simulate: Boolean): Result<ApiClient.SimulationDecisionDto> =
+        apiClient.setVehicleSimulation(vehicleId, simulate)
 
-    // ── Comandos (bloqueio/desbloqueio) ────────────────────────────────────
+    // ── Comandos ──────────────────────────────────────────────────────────────
 
-    /**
-     * Envia comando de bloqueio/desbloqueio para o veículo via backend.
-     * O backend coloca o comando na fila e o hardware (rastreador) busca via polling.
-     */
-    suspend fun sendCommand(vehicleId: Long, command: String, note: String? = null): Result<ApiClient.CommandDto> {
-        return apiClient.sendCommand(vehicleId, command, note)
-    }
+    suspend fun sendCommand(vehicleId: Long, command: String, note: String? = null): Result<ApiClient.CommandDto> =
+        apiClient.sendCommand(vehicleId, command, note)
 
-    /**
-     * Busca comandos do veículo no backend.
-     */
-    suspend fun getCommands(vehicleId: Long, status: String? = null): Result<List<ApiClient.CommandDto>> {
-        return apiClient.getCommands(vehicleId, status)
-    }
+    suspend fun getCommands(vehicleId: Long, status: String? = null): Result<List<ApiClient.CommandDto>> =
+        apiClient.getCommands(vehicleId, status)
 
-    // ── Telemetria ────────────────────────────────────────────────────────
+    // ── Telemetria ────────────────────────────────────────────────────────────
 
-    /**
-     * Busca a última telemetria do veículo no backend.
-     */
-    suspend fun getLatestTelemetry(vehicleId: Long): Result<ApiClient.TelemetryDto?> {
-        return apiClient.getLatestTelemetry(vehicleId)
-    }
+    suspend fun getLatestTelemetry(vehicleId: Long): Result<ApiClient.TelemetryDto?> =
+        apiClient.getLatestTelemetry(vehicleId)
 
-    // ── Localização do celular (GPS do usuário) ──────────────────────────
+    suspend fun getLatestMobileLocation(): Result<ApiClient.MobileLocationDto?> =
+        apiClient.getLatestMobileLocation()
 
-    /**
-     * Busca a última localização do celular deste usuário registrada no backend.
-     * Permite exibir o aparelho "junto do veículo" no mapa de rastreamento.
-     */
-    suspend fun getLatestMobileLocation(): Result<ApiClient.MobileLocationDto?> {
-        return apiClient.getLatestMobileLocation()
-    }
+    suspend fun getTelemetryHistory(vehicleId: Long, limit: Int = 100): Result<List<ApiClient.TelemetryDto>> =
+        apiClient.getTelemetryHistory(vehicleId, limit)
 
-    /**
-     * Busca o histórico de telemetria do veículo no backend.
-     */
-    suspend fun getTelemetryHistory(vehicleId: Long, limit: Int = 100): Result<List<ApiClient.TelemetryDto>> {
-        return apiClient.getTelemetryHistory(vehicleId, limit)
-    }
+    // ── Rotas ─────────────────────────────────────────────────────────────────
 
-    // ── Rotas ─────────────────────────────────────────────────────────────
+    suspend fun startRoute(vehicleId: Long): Result<ApiClient.RouteDto> = apiClient.startRoute(vehicleId)
+    suspend fun stopRoute(vehicleId: Long): Result<ApiClient.RouteDto>  = apiClient.stopRoute(vehicleId)
+    suspend fun getRoutes(vehicleId: Long): Result<List<ApiClient.RouteDto>> = apiClient.getRoutes(vehicleId)
+    suspend fun getRoute(routeId: Long): Result<Pair<ApiClient.RouteDto, List<ApiClient.TelemetryDto>>> = apiClient.getRoute(routeId)
 
-    /**
-     * Inicia uma rota no backend.
-     */
-    suspend fun startRoute(vehicleId: Long): Result<ApiClient.RouteDto> {
-        return apiClient.startRoute(vehicleId)
-    }
+    // ── Mapeamento ─────────────────────────────────────────────────────────────
 
-    /**
-     * Finaliza uma rota no backend.
-     */
-    suspend fun stopRoute(vehicleId: Long): Result<ApiClient.RouteDto> {
-        return apiClient.stopRoute(vehicleId)
-    }
-
-    /**
-     * Busca rotas do veículo no backend.
-     */
-    suspend fun getRoutes(vehicleId: Long): Result<List<ApiClient.RouteDto>> {
-        return apiClient.getRoutes(vehicleId)
-    }
-
-    /**
-     * Busca uma rota com seus pontos geográficos no backend.
-     */
-    suspend fun getRoute(routeId: Long): Result<Pair<ApiClient.RouteDto, List<ApiClient.TelemetryDto>>> {
-        return apiClient.getRoute(routeId)
-    }
-
-    // ── Mapeamento DTO -> Entity ───────────────────────────────────────────
-
-    private fun ApiClient.VehicleDto.toEntity(): Vehicle {
-        return Vehicle(
-            id = id,
-            userId = userId,
-            plate = plate,
-            model = model,
-            brand = brand,
-            year = year,
-            color = color,
-            isBlocked = isBlocked,
-            latitude = latitude,
-            longitude = longitude,
-            speed = speed,
-            lastUpdate = lastUpdate,
-            createdAt = createdAt
-        )
-    }
+    private fun ApiClient.VehicleDto.toModel() = VehicleModel(
+        id        = id,
+        userId    = userId,
+        plate     = plate,
+        model     = model,
+        brand     = brand,
+        year      = year,
+        color     = color,
+        isBlocked = isBlocked,
+        latitude  = latitude,
+        longitude = longitude,
+        speed     = speed,
+        lastUpdate = lastUpdate,
+        createdAt  = createdAt
+    )
 }

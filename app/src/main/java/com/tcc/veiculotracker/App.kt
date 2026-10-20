@@ -1,7 +1,6 @@
 package com.tcc.veiculotracker
 
 import android.app.Application
-import com.tcc.veiculotracker.data.local.AppDatabase
 import com.tcc.veiculotracker.data.remote.FirebaseDataSource
 import com.tcc.veiculotracker.data.remote.LocationService
 import com.tcc.veiculotracker.data.repository.ApiConfigRepository
@@ -14,31 +13,27 @@ import org.osmdroid.config.Configuration
 
 class App : Application() {
 
-    val database: AppDatabase by lazy { AppDatabase.getInstance(this) }
-
     val firebaseDataSource: FirebaseDataSource by lazy { FirebaseDataSource() }
 
-    val syncManager: SyncManager by lazy { SyncManager(firebaseDataSource, database, backendRepository) }
+    val backendRepository: BackendRepository by lazy { BackendRepository(this@App) }
 
-    val authRepository: AuthRepository by lazy { AuthRepository(database.userDao(), syncManager) }
+    val syncManager: SyncManager by lazy { SyncManager(firebaseDataSource, this@App, backendRepository) }
 
-    val vehicleRepository: VehicleRepository by lazy {
-        VehicleRepository(database.vehicleDao(), syncManager)
-    }
+    val authRepository: AuthRepository by lazy { AuthRepository(this@App, syncManager) }
 
-    val routeRepository: RouteRepository by lazy { RouteRepository(database.routeDao(), syncManager) }
+    val vehicleRepository: VehicleRepository by lazy { VehicleRepository(syncManager) }
 
-    val apiConfigRepository: ApiConfigRepository by lazy { ApiConfigRepository(database.apiConfigDao()) }
+    val routeRepository: RouteRepository by lazy { RouteRepository(syncManager) }
 
-    val backendRepository: BackendRepository by lazy {
-        BackendRepository(this@App, database.vehicleDao())
-    }
+    // ApiConfigRepository: mantém a URL/token do backend em SharedPreferences.
+    // Não usa mais Room — o ApiConfigDao foi removido; a configuração fica
+    // apenas nas prefs (KEY_API_URL / KEY_API_TOKEN), que o ApiClient já lê.
+    val apiConfigRepository: ApiConfigRepository by lazy { ApiConfigRepository(this@App) }
 
     val locationService: LocationService by lazy { LocationService(this@App) }
 
     override fun onCreate() {
         super.onCreate()
-        // Obrigatório no osmdroid, antes de qualquer MapView ser criado.
         Configuration.getInstance().userAgentValue = packageName
     }
 }

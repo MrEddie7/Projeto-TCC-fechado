@@ -6,7 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.tcc.veiculotracker.App
-import com.tcc.veiculotracker.data.local.entity.Vehicle
+import com.tcc.veiculotracker.data.model.VehicleModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,8 +19,8 @@ class VehicleDetailViewModel(
 
     private val vehicleRepository = (application as App).vehicleRepository
 
-    private val _vehicle = MutableStateFlow<Vehicle?>(null)
-    val vehicle: StateFlow<Vehicle?> = _vehicle.asStateFlow()
+    private val _vehicle = MutableStateFlow<VehicleModel?>(null)
+    val vehicle: StateFlow<VehicleModel?> = _vehicle.asStateFlow()
 
     init {
         loadVehicle()
@@ -28,8 +28,8 @@ class VehicleDetailViewModel(
 
     private fun loadVehicle() {
         viewModelScope.launch {
-            vehicleRepository.getVehicleById(vehicleId).collect { v ->
-                _vehicle.value = v
+            vehicleRepository.getVehiclesByUser(-1).collect { list ->
+                _vehicle.value = list.firstOrNull { it.id == vehicleId }
             }
         }
     }

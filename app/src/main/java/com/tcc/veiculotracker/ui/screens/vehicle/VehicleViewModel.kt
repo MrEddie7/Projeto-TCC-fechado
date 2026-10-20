@@ -5,7 +5,7 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.tcc.veiculotracker.App
-import com.tcc.veiculotracker.data.local.entity.Vehicle
+import com.tcc.veiculotracker.data.model.VehicleModel
 import com.tcc.veiculotracker.util.Constants
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -24,7 +24,7 @@ data class VehicleRegisterState(
 )
 
 data class VehicleListState(
-    val vehicles: List<Vehicle> = emptyList(),
+    val vehicles: List<VehicleModel> = emptyList(),
     val isLoading: Boolean = true
 )
 
@@ -41,7 +41,7 @@ class VehicleViewModel(application: Application) : AndroidViewModel(application)
     private val _listState = MutableStateFlow(VehicleListState())
     val listState: StateFlow<VehicleListState> = _listState
 
-    val vehicles: StateFlow<List<Vehicle>> = repository.getVehiclesByUser(userId)
+    val vehicles: StateFlow<List<VehicleModel>> = repository.getVehiclesByUser(userId)
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     init {
@@ -65,47 +65,26 @@ class VehicleViewModel(application: Application) : AndroidViewModel(application)
             val modelStr = model.trim()
             val brandStr = brand.trim()
             val colorStr = color.trim()
-            val yearInt = year.toIntOrNull() ?: 0
+            val yearInt  = year.toIntOrNull() ?: 0
 
-            // Com o backend (API Node) configurado, cadastra o veículo na API —
-            // que é a fonte da verdade — para que ele apareça também no painel
-            // do administrador. O BackendRepository salva o veículo retornado
-            // (com o id do servidor) no Room. Sem backend, mantém o cadastro
-            // apenas local (modo offline).
-            val created: Result<Vehicle> = if (backend.isConfigured) {
-                backend.createVehicle(plateStr, modelStr, brandStr, yearInt, colorStr)
-            } else {
-                runCatching {
-                    val id = repository.registerVehicle(
-                        Vehicle(
-                            userId = userId,
-                            plate = plateStr,
-                            model = modelStr,
-                            brand = brandStr,
-                            year = yearInt,
-                            color = colorStr
-                        )
-                    )
-                    Vehicle(
-                        id = id,
-                        userId = userId,
-                        plate = plateStr,
-                        model = modelStr,
-                        brand = brandStr,
-                        year = yearInt,
-                        color = colorStr
-                    )
-                }
+            val vehicle = VehicleModel(
+                userId = userId,
+                plate  = plateStr,
+                model  = modelStr,
+                brand  = brandStr,
+                year   = yearInt,
+                color  = colorStr
+            )
+
+            val created: Result<VehicleModel> = runCatching {
+                repository.registerVehicle(vehicle)
             }
 
             created.fold(
-                onSuccess = { vehicle ->
-                    // Pergunta ao backend se este veículo deve entrar na
-                    // simulação (frota simulada). A resposta vira um prompt
-                    // Sim/Não para o usuário confirmar e enviar de volta.
+                onSuccess = { v ->
                     if (backend.isConfigured) {
                         val decision = runCatching {
-                            backend.getSimulationDecision(vehicle.id).getOrNull()
+                            backend.getSimulationDecision(v.id).getOrNull()
                         }.getOrNull()
                         if (decision != null &&
                             decision.simulationAvailable &&
@@ -114,9 +93,9 @@ class VehicleViewModel(application: Application) : AndroidViewModel(application)
                         ) {
                             _registerState.value = VehicleRegisterState(
                                 pendingSimulation = SimulationPrompt(
-                                    vehicleId = vehicle.id,
+                                    vehicleId   = v.id,
                                     recommended = decision.recommended,
-                                    reason = decision.reason
+                                    reason      = decision.reason
                                 )
                             )
                             return@fold
@@ -131,10 +110,6 @@ class VehicleViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    /**
-     * Envia ao backend a escolha do usuário sobre adicionar o veículo à
-     * simulação e conclui o cadastro.
-     */
     fun answerSimulation(simulate: Boolean) {
         val prompt = _registerState.value.pendingSimulation ?: return
         viewModelScope.launch {
@@ -144,17 +119,10 @@ class VehicleViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun deleteVehicle(vehicle: Vehicle) {
-        viewModelScope.launch {
-            repository.deleteVehicle(vehicle)
-        }
+    fun deleteVehicle(vehicle: VehicleModel) {
+        viewModelScope.launch { repository.deleteVehicle(vehicle) }
     }
 
-    fun clearRegisterError() {
-        _registerState.value = _registerState.value.copy(error = null)
-    }
-
-    fun resetRegisterState() {
-        _registerState.value = VehicleRegisterState()
-    }
+    fun clearRegisterError()  { _registerState.value = _registerState.value.copy(error = null) }
+    fun resetRegisterState()  { _registerState.value = VehicleRegisterState() }
 }

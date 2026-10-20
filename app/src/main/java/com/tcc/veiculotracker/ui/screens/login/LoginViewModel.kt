@@ -12,7 +12,7 @@ import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.tcc.veiculotracker.App
 import com.tcc.veiculotracker.R
-import com.tcc.veiculotracker.data.local.entity.User
+import com.tcc.veiculotracker.data.model.UserModel
 import com.tcc.veiculotracker.util.Constants
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,7 +24,7 @@ data class LoginState(
     val isLoading: Boolean = false,
     val isLoggedIn: Boolean = false,
     val error: String? = null,
-    val user: User? = null
+    val user: UserModel? = null
 )
 
 class LoginViewModel(application: Application) : AndroidViewModel(application) {
@@ -144,10 +144,11 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun persistSession(user: User) {
+    private fun persistSession(user: UserModel) {
         prefs.edit().apply {
             putBoolean(Constants.KEY_LOGGED_IN, true)
             putLong(Constants.KEY_USER_ID, user.id)
+            putString(Constants.KEY_FIREBASE_UID, user.firebaseUid)
             putString(Constants.KEY_USER_NAME, user.name)
             putString(Constants.KEY_USER_EMAIL, user.email)
             apply()

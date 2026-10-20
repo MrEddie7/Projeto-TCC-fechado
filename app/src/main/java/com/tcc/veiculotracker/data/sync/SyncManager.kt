@@ -1,93 +1,78 @@
 package com.tcc.veiculotracker.data.sync
 
-import com.tcc.veiculotracker.data.local.AppDatabase
-import com.tcc.veiculotracker.data.local.entity.Route
-import com.tcc.veiculotracker.data.local.entity.User
-import com.tcc.veiculotracker.data.local.entity.Vehicle
+import android.content.Context
+import com.tcc.veiculotracker.data.local.OfflineCacheManager
+import com.tcc.veiculotracker.data.model.RouteModel
+import com.tcc.veiculotracker.data.model.UserModel
+import com.tcc.veiculotracker.data.model.VehicleModel
 import com.tcc.veiculotracker.data.remote.ApiClient
 import com.tcc.veiculotracker.data.remote.FirebaseDataSource
 import com.tcc.veiculotracker.data.repository.BackendRepository
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 
 /**
- * Responsável por encapsular o FirebaseDataSource + DAOs e orquestrar a
- * sincronização bidirecional entre Room (fonte imediata) e a nuvem.
- *
- * Estratégia híbrida: as escritas são feitas primeiro no banco local (Room),
- * e então propagadas para o Firebase via write-through. Telemetria e comandos
- * (baixa latência) são tratados pelo Firebase Realtime Database.
+ * Orquestra a sincronização entre o Firestore (fonte da verdade) e o cache
+ * offline em JSON. O Room foi removido; os dados vivem no Firestore enquanto
+ * há rede, e no arquivo JSON do dispositivo quando offline.
  */
 class SyncManager(
     val firebaseDataSource: FirebaseDataSource,
-    private val db: AppDatabase,
+    private val context: Context,
     val backendRepository: BackendRepository? = null
 ) {
 
-    // ── Usuários ─────────────────────────────────────────────────────────
+    // ── Usuários ─────────────────────────────────────────────────────────────
 
-    /**
-     * Propagação para a nuvem é best-effort: o Room é a fonte imediata da
-     * verdade, portanto falhas de rede/console não podem bloquear a operação local.
-     */
-    suspend fun syncUser(user: User) {
+    suspend fun syncUser(user: UserModel) {
         runCatching { firebaseDataSource.syncUser(user) }
     }
 
-    /**
-     * Envia ao Firestore a conta logada e TODOS os veículos dela, vinculados ao
-     * UID da conta (firebaseUid / ownerUid / ownerEmail). É o "cadastro na
-     * nuvem" feito ao entrar no app, para o backend exibir a conta e a frota
-     * que vieram do aplicativo.
-     */
-    suspend fun syncAccountToCloud(user: User) {
+    suspend fun syncAccountToCloud(user: UserModel) {
         runCatching { firebaseDataSource.syncUser(user) }
         syncVehiclesToCloud(user.id)
     }
 
-    /** Mesma ideia de [syncAccountToCloud], partindo do id local do usuário. */
     suspend fun syncAccountToCloud(userId: Long) {
-        val user = db.userDao().getUserById(userId).first() ?: return
-        syncAccountToCloud(user)
+        // No-op quando não há um UserModel disponível; VehicleRepository chama
+        // a versão com UserModel após o login.
+    }
+
+    // ── Veículos ─────────────────────────────────────────────────────────────
+
+    suspend fun syncVehicle(vehicle: VehicleModel) {
+        runCatching { firebaseDataSource.syncVehicle(vehicle) }
     }
 
     /**
-     * Envia ao Firestore todos os veículos do usuário vinculados à conta logada.
-     * Retorna quantos foram enviados com sucesso.
+     * Envia ao Firestore todos os veículos obtidos do backend (ou cache local).
+     * Retorna o número enviado.
      */
     suspend fun syncVehiclesToCloud(userId: Long): Int {
+        val vehicles = runCatching {
+            firebaseDataSource.getVehiclesOnce(userId)
+        }.getOrDefault(emptyList())
         var sent = 0
-        for (vehicle in db.vehicleDao().getVehiclesListByUser(userId)) {
-            runCatching { firebaseDataSource.syncVehicle(vehicle) }
-                .onSuccess { sent++ }
+        for (v in vehicles) {
+            runCatching { firebaseDataSource.syncVehicle(v) }.onSuccess { sent++ }
         }
         return sent
-    }
-
-    // ── Veículos ─────────────────────────────────────────────────────────
-
-    suspend fun syncVehicle(vehicle: Vehicle) {
-        runCatching { firebaseDataSource.syncVehicle(vehicle) }
     }
 
     suspend fun deleteVehicle(vehicleId: Long) {
         runCatching { firebaseDataSource.deleteVehicle(vehicleId.toString()) }
     }
 
-    /** Importa os veículos da nuvem (best-effort); vazio se indisponível. */
-    suspend fun pullVehicles(userId: Long): List<Vehicle> {
+    suspend fun pullVehicles(userId: Long): List<VehicleModel> {
         return runCatching { firebaseDataSource.getVehiclesOnce(userId) }
             .getOrDefault(emptyList())
     }
 
-    // Bug 2 fix: passa Long diretamente (assinatura corrigida no FirebaseDataSource).
-    fun getVehiclesByUser(userId: Long): Flow<List<Vehicle>> {
-        return firebaseDataSource.getVehiclesByUser(userId)
-    }
+    fun getVehiclesByUser(userId: Long): Flow<List<VehicleModel>> =
+        firebaseDataSource.getVehiclesByUser(userId)
 
-    // ── Rotas ────────────────────────────────────────────────────────────
+    // ── Rotas ─────────────────────────────────────────────────────────────────
 
-    suspend fun syncRoute(route: Route) {
+    suspend fun syncRoute(route: RouteModel) {
         runCatching { firebaseDataSource.syncRoute(route) }
     }
 
@@ -95,118 +80,82 @@ class SyncManager(
         runCatching { firebaseDataSource.deleteRoute(routeId.toString()) }
     }
 
-    // Bug 2 fix: passa Long diretamente.
-    fun getRoutesByUser(userId: Long): Flow<List<Route>> {
-        return firebaseDataSource.getRoutesByUser(userId)
+    fun getRoutesByUser(userId: Long): Flow<List<RouteModel>> =
+        firebaseDataSource.getRoutesByUser(userId)
+
+    // ── Cache offline ─────────────────────────────────────────────────────────
+
+    /**
+     * Atualiza o cache JSON com os veículos do Firestore.
+     * Chamado periodicamente (ex: a cada 15 minutos) ou ao receber novos dados.
+     */
+    fun refreshOfflineCache(vehicles: List<VehicleModel>) {
+        OfflineCacheManager.saveVehicles(context, vehicles)
     }
 
-    // ── Telemetria (Realtime Database) ───────────────────────────────────
+    fun loadOfflineVehicles(): List<VehicleModel> =
+        OfflineCacheManager.loadVehicles(context)
 
-    fun listenTelemetry(vehicleId: Long): Flow<FirebaseDataSource.TelemetryData> {
-        return firebaseDataSource.listenTelemetry(vehicleId.toString())
-    }
+    fun offlineCacheAgeMs(): Long =
+        OfflineCacheManager.vehiclesCacheAge(context)
+
+    // ── Telemetria (Realtime Database) ────────────────────────────────────────
+
+    fun listenTelemetry(vehicleId: Long): Flow<FirebaseDataSource.TelemetryData> =
+        firebaseDataSource.listenTelemetry(vehicleId.toString())
 
     suspend fun sendTelemetry(vehicleId: Long, data: FirebaseDataSource.TelemetryData) {
         runCatching { firebaseDataSource.sendTelemetry(vehicleId.toString(), data) }
     }
 
-    // ── Comandos (Realtime Database) ─────────────────────────────────────
+    // ── Comandos (Realtime Database) ──────────────────────────────────────────
 
     suspend fun sendCommand(vehicleId: Long, command: String) {
         runCatching { firebaseDataSource.sendCommand(vehicleId.toString(), command) }
     }
 
-    fun listenCommandResponse(vehicleId: Long): Flow<FirebaseDataSource.RemoteCommand> {
-        return firebaseDataSource.listenCommandResponse(vehicleId.toString())
-    }
+    fun listenCommandResponse(vehicleId: Long): Flow<FirebaseDataSource.RemoteCommand> =
+        firebaseDataSource.listenCommandResponse(vehicleId.toString())
 
-    // ── Backend (Node.js API) ────────────────────────────────────────────
+    // ── Backend (Node.js API) ─────────────────────────────────────────────────
 
-    /**
-     * Sincroniza veículos do backend para o banco local.
-     * O backend é a fonte da verdade para veículos, telemetria e comandos.
-     */
-    suspend fun syncVehiclesFromBackend(): Result<Int> {
-        return backendRepository?.syncVehiclesFromBackend()
+    suspend fun syncVehiclesFromBackend(): Result<Int> =
+        backendRepository?.syncVehiclesFromBackend()
             ?: Result.failure(IllegalStateException("BackendRepository não configurado"))
-    }
 
-    /**
-     * Envia ao backend os veículos que existem apenas localmente, para que
-     * apareçam também no painel do administrador.
-     */
-    suspend fun pushLocalVehiclesToBackend(userId: Long): Result<Int> {
-        return backendRepository?.pushLocalVehiclesToBackend(userId)
+    suspend fun pushLocalVehiclesToBackend(userId: Long): Result<Int> =
+        backendRepository?.pushLocalVehiclesToBackend(userId)
             ?: Result.failure(IllegalStateException("BackendRepository não configurado"))
-    }
 
-    /**
-     * Envia comando para o backend (que o hardware vai buscar via polling).
-     */
-    suspend fun sendCommandToBackend(vehicleId: Long, command: String, note: String? = null): Result<ApiClient.CommandDto> {
-        return backendRepository?.sendCommand(vehicleId, command, note)
+    suspend fun sendCommandToBackend(vehicleId: Long, command: String, note: String? = null): Result<ApiClient.CommandDto> =
+        backendRepository?.sendCommand(vehicleId, command, note)
             ?: Result.failure(IllegalStateException("BackendRepository não configurado"))
-    }
 
-    /**
-     * Busca a última telemetria do veículo no backend.
-     */
-    suspend fun getLatestTelemetryFromBackend(vehicleId: Long): Result<ApiClient.TelemetryDto?> {
-        return backendRepository?.getLatestTelemetry(vehicleId)
+    suspend fun getLatestTelemetryFromBackend(vehicleId: Long): Result<ApiClient.TelemetryDto?> =
+        backendRepository?.getLatestTelemetry(vehicleId)
             ?: Result.failure(IllegalStateException("BackendRepository não configurado"))
-    }
 
-    /**
-     * Busca a última localização do celular do usuário no backend.
-     */
-    suspend fun getLatestMobileLocationFromBackend(): Result<ApiClient.MobileLocationDto?> {
-        return backendRepository?.getLatestMobileLocation()
+    suspend fun getLatestMobileLocationFromBackend(): Result<ApiClient.MobileLocationDto?> =
+        backendRepository?.getLatestMobileLocation()
             ?: Result.failure(IllegalStateException("BackendRepository não configurado"))
-    }
 
-    /**
-     * Busca o histórico de telemetria do veículo no backend.
-     */
-    suspend fun getTelemetryHistoryFromBackend(vehicleId: Long, limit: Int = 100): Result<List<ApiClient.TelemetryDto>> {
-        return backendRepository?.getTelemetryHistory(vehicleId, limit)
+    suspend fun getTelemetryHistoryFromBackend(vehicleId: Long, limit: Int = 100): Result<List<ApiClient.TelemetryDto>> =
+        backendRepository?.getTelemetryHistory(vehicleId, limit)
             ?: Result.failure(IllegalStateException("BackendRepository não configurado"))
-    }
 
-    /**
-     * Inicia uma rota no backend.
-     */
-    suspend fun startRouteInBackend(vehicleId: Long): Result<ApiClient.RouteDto> {
-        return backendRepository?.startRoute(vehicleId)
+    suspend fun startRouteInBackend(vehicleId: Long): Result<ApiClient.RouteDto> =
+        backendRepository?.startRoute(vehicleId)
             ?: Result.failure(IllegalStateException("BackendRepository não configurado"))
-    }
 
-    /**
-     * Finaliza uma rota no backend.
-     */
-    suspend fun stopRouteInBackend(vehicleId: Long): Result<ApiClient.RouteDto> {
-        return backendRepository?.stopRoute(vehicleId)
+    suspend fun stopRouteInBackend(vehicleId: Long): Result<ApiClient.RouteDto> =
+        backendRepository?.stopRoute(vehicleId)
             ?: Result.failure(IllegalStateException("BackendRepository não configurado"))
-    }
 
-    /**
-     * Busca rotas do veículo no backend.
-     */
-    suspend fun getRoutesFromBackend(vehicleId: Long): Result<List<ApiClient.RouteDto>> {
-        return backendRepository?.getRoutes(vehicleId)
+    suspend fun getRoutesFromBackend(vehicleId: Long): Result<List<ApiClient.RouteDto>> =
+        backendRepository?.getRoutes(vehicleId)
             ?: Result.failure(IllegalStateException("BackendRepository não configurado"))
-    }
 
-    /**
-     * Busca uma rota com pontos no backend.
-     */
-    suspend fun getRouteFromBackend(routeId: Long): Result<Pair<ApiClient.RouteDto, List<ApiClient.TelemetryDto>>> {
-        return backendRepository?.getRoute(routeId)
+    suspend fun getRouteFromBackend(routeId: Long): Result<Pair<ApiClient.RouteDto, List<ApiClient.TelemetryDto>>> =
+        backendRepository?.getRoute(routeId)
             ?: Result.failure(IllegalStateException("BackendRepository não configurado"))
-    }
-
-    // ── Dados brutos (para acesso direto quando necessário) ──────────────
-
-    val vehicleDao get() = db.vehicleDao()
-    val routeDao get() = db.routeDao()
-    val userDao get() = db.userDao()
 }

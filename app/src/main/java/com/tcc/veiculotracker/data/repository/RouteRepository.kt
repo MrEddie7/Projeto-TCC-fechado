@@ -1,50 +1,62 @@
 package com.tcc.veiculotracker.data.repository
 
-import com.tcc.veiculotracker.data.local.dao.RouteDao
-import com.tcc.veiculotracker.data.local.entity.Route
-import com.tcc.veiculotracker.data.local.entity.RoutePoint
+import com.tcc.veiculotracker.data.model.RouteModel
+import com.tcc.veiculotracker.data.model.RoutePointModel
 import com.tcc.veiculotracker.data.sync.SyncManager
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * Repositório de rotas sem Room. Fonte da verdade = Firestore.
+ * RoutePoints (pontos GPS de uma rota) são armazenados no Firestore sob
+ * routes/{id}/points como sub-coleção — ou gerenciados pelo backend.
+ */
 class RouteRepository(
-    private val routeDao: RouteDao,
     private val syncManager: SyncManager
 ) {
 
-    fun getRoutesByUser(userId: Long): Flow<List<Route>> {
-        return routeDao.getRoutesByUser(userId)
+    fun getRoutesByUser(userId: Long): Flow<List<RouteModel>> =
+        syncManager.getRoutesByUser(userId)
+
+    suspend fun startRoute(route: RouteModel): RouteModel {
+        val backend = syncManager.backendRepository
+        if (backend != null && backend.isConfigured) {
+            val result = runCatching { backend.startRoute(route.vehicleId).getOrNull() }.getOrNull()
+            if (result != null) return result.toModel()
+        }
+        runCatching { syncManager.syncRoute(route) }
+        return route
     }
 
-    fun getRoutesByVehicle(vehicleId: Long): Flow<List<Route>> {
-        return routeDao.getRoutesByVehicle(vehicleId)
+    suspend fun endRoute(route: RouteModel) {
+        val backend = syncManager.backendRepository
+        if (backend != null && backend.isConfigured) {
+            runCatching { backend.stopRoute(route.vehicleId) }
+            return
+        }
+        runCatching { syncManager.syncRoute(route) }
     }
 
-    fun getRouteById(routeId: Long): Flow<Route?> {
-        return routeDao.getRouteById(routeId)
+    suspend fun deleteRoute(route: RouteModel) {
+        runCatching { syncManager.deleteRoute(route.id) }
     }
 
-    fun getRoutePoints(routeId: Long): Flow<List<RoutePoint>> {
-        return routeDao.getRoutePoints(routeId)
-    }
+    // RoutePoints são mantidos pelo backend via telemetria; o app não precisa
+    // gravá-los localmente. Retorna lista vazia quando sem backend.
+    suspend fun getRoutePoints(routeId: Long): List<RoutePointModel> = emptyList()
 
-    suspend fun startRoute(route: Route): Long {
-        val id = routeDao.insertRoute(route)
-        syncManager.syncRoute(route.copy(id = id))
-        return id
-    }
+    // ── Mapeamento DTO → Model ─────────────────────────────────────────────
 
-    suspend fun endRoute(route: Route) {
-        routeDao.updateRoute(route)
-        syncManager.syncRoute(route)
-    }
-
-    suspend fun addRoutePoint(point: RoutePoint): Long {
-        return routeDao.insertRoutePoint(point)
-    }
-
-    suspend fun deleteRoute(route: Route) {
-        routeDao.deleteRoutePoints(route.id)
-        routeDao.deleteRoute(route)
-        syncManager.deleteRoute(route.id)
-    }
+    private fun com.tcc.veiculotracker.data.remote.ApiClient.RouteDto.toModel() = RouteModel(
+        id             = id,
+        vehicleId      = vehicleId,
+        userId         = userId,
+        startLatitude  = startLatitude,
+        startLongitude = startLongitude,
+        endLatitude    = endLatitude,
+        endLongitude   = endLongitude,
+        startTime      = startTime,
+        endTime        = endTime,
+        distance       = distance,
+        status         = status
+    )
 }

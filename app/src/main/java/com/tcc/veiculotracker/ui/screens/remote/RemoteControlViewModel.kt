@@ -5,14 +5,14 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.tcc.veiculotracker.App
-import com.tcc.veiculotracker.data.local.entity.Vehicle
+import com.tcc.veiculotracker.data.model.VehicleModel
 import com.tcc.veiculotracker.util.Constants
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 data class RemoteControlState(
-    val vehicles: List<Vehicle> = emptyList(),
-    val selectedVehicle: Vehicle? = null,
+    val vehicles: List<VehicleModel> = emptyList(),
+    val selectedVehicle: VehicleModel? = null,
     val isExecuting: Boolean = false,
     val lastAction: String? = null,
     val error: String? = null,
@@ -50,7 +50,7 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
-    fun selectVehicle(vehicle: Vehicle) {
+    fun selectVehicle(vehicle: VehicleModel) {
         _state.value = _state.value.copy(selectedVehicle = vehicle)
     }
 
@@ -59,8 +59,7 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
         viewModelScope.launch {
             _state.value = _state.value.copy(isExecuting = true, error = null)
             try {
-                // Atualiza o Room (otimista) para refletir na hora.
-                vehicleRepository.setBlocked(vehicle.id, true)
+                vehicleRepository.setBlocked(vehicle.id, true, vehicle)
                 dispatchCommand(vehicle.id, "block")
                 _state.value = _state.value.copy(
                     isExecuting = false,
@@ -80,7 +79,7 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
         viewModelScope.launch {
             _state.value = _state.value.copy(isExecuting = true, error = null)
             try {
-                vehicleRepository.setBlocked(vehicle.id, false)
+                vehicleRepository.setBlocked(vehicle.id, false, vehicle)
                 dispatchCommand(vehicle.id, "unblock")
                 _state.value = _state.value.copy(
                     isExecuting = false,

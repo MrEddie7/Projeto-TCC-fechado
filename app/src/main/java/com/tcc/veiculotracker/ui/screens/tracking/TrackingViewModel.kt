@@ -8,7 +8,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.tcc.veiculotracker.App
-import com.tcc.veiculotracker.data.local.entity.Vehicle
+import com.tcc.veiculotracker.data.model.VehicleModel
 import com.tcc.veiculotracker.util.Constants
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -16,8 +16,8 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 data class TrackingState(
-    val vehicles: List<Vehicle> = emptyList(),
-    val selectedVehicle: Vehicle? = null,
+    val vehicles: List<VehicleModel> = emptyList(),
+    val selectedVehicle: VehicleModel? = null,
     val currentLatitude: Double = 0.0,
     val currentLongitude: Double = 0.0,
     val isTracking: Boolean = false,
@@ -70,7 +70,7 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun selectVehicle(vehicle: Vehicle) {
+    fun selectVehicle(vehicle: VehicleModel) {
         stopListening()
         stopPhoneTracking()
         _state.value = _state.value.copy(
@@ -104,7 +104,7 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         startPhoneTracking()
     }
 
-    private fun startListening(vehicle: Vehicle) {
+    private fun startListening(vehicle: VehicleModel) {
         telemetryJob?.cancel()
         telemetryJob = viewModelScope.launch {
             // Tenta usar o backend primeiro (mais confiável)
@@ -121,7 +121,7 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
      * Obtém a telemetria do backend via polling.
      * O backend é a fonte da verdade para veículos, telemetria e comandos.
      */
-    private suspend fun startBackendPolling(vehicle: Vehicle) {
+    private suspend fun startBackendPolling(vehicle: VehicleModel) {
         while (true) {
             try {
                 val result = syncManager.getLatestTelemetryFromBackend(vehicle.id)
@@ -132,12 +132,16 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
                             currentLongitude = telemetry.longitude,
                             error = null
                         )
-                        // Persiste a última posição recebida no Room
                         vehicleRepository.updateLocation(
                             vehicle.id,
                             telemetry.latitude,
                             telemetry.longitude,
-                            telemetry.speed
+                            telemetry.speed,
+                            vehicle.copy(
+                                latitude  = telemetry.latitude,
+                                longitude = telemetry.longitude,
+                                speed     = telemetry.speed
+                            )
                         )
                     }
                 }.onFailure { e ->
@@ -158,7 +162,7 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
      * Fallback: escuta a telemetria do Firebase Realtime Database.
      * Usado quando o backend não está configurado.
      */
-    private suspend fun startFirebaseListening(vehicle: Vehicle) {
+    private suspend fun startFirebaseListening(vehicle: VehicleModel) {
         syncManager.listenTelemetry(vehicle.id)
             .catch { e ->
                 _state.value = _state.value.copy(
@@ -172,12 +176,16 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
                     currentLongitude = telemetry.longitude,
                     error = null
                 )
-                // Persiste a última posição recebida no Room (e propaga para o Firestore)
                 vehicleRepository.updateLocation(
                     vehicle.id,
                     telemetry.latitude,
                     telemetry.longitude,
-                    telemetry.speed
+                    telemetry.speed,
+                    vehicle.copy(
+                        latitude  = telemetry.latitude,
+                        longitude = telemetry.longitude,
+                        speed     = telemetry.speed
+                    )
                 )
             }
     }

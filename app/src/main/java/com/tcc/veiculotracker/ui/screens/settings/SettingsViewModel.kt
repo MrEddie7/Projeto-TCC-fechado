@@ -5,13 +5,13 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.tcc.veiculotracker.App
-import com.tcc.veiculotracker.data.local.entity.User
+import com.tcc.veiculotracker.data.model.UserModel
 import com.tcc.veiculotracker.util.Constants
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 data class SettingsState(
-    val user: User? = null,
+    val user: UserModel? = null,
     val isDarkMode: Boolean = false,
     val notificationsEnabled: Boolean = true,
     val trackingInterval: Int = 5,
@@ -36,16 +36,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     private fun loadSettings() {
         _state.value = SettingsState(
-            isDarkMode = prefs.getBoolean(Constants.KEY_DARK_MODE, false),
+            user                 = authRepository.currentUser(),
+            isDarkMode           = prefs.getBoolean(Constants.KEY_DARK_MODE, false),
             notificationsEnabled = prefs.getBoolean(Constants.KEY_NOTIFICATIONS, true),
-            trackingInterval = prefs.getInt(Constants.KEY_TRACKING_INTERVAL, 5)
+            trackingInterval     = prefs.getInt(Constants.KEY_TRACKING_INTERVAL, 5)
         )
-
-        viewModelScope.launch {
-            authRepository.getUserById(userId).collect { user ->
-                _state.value = _state.value.copy(user = user)
-            }
-        }
     }
 
     fun updateDarkMode(enabled: Boolean) {

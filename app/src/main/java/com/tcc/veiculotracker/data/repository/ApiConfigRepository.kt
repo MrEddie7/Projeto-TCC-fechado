@@ -1,33 +1,32 @@
 package com.tcc.veiculotracker.data.repository
 
-import com.tcc.veiculotracker.data.local.dao.ApiConfigDao
-import com.tcc.veiculotracker.data.local.entity.ApiConfig
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
+import android.content.Context
+import com.tcc.veiculotracker.util.Constants
 
-class ApiConfigRepository(private val apiConfigDao: ApiConfigDao) {
+/**
+ * Gerencia a configuração da URL e token do backend Node.js.
+ * Substituiu o Room (ApiConfigDao) por SharedPreferences — o dado é simples
+ * e não precisa de banco de dados.
+ */
+class ApiConfigRepository(private val context: Context) {
 
-    fun getConfigsByUser(userId: Long): Flow<List<ApiConfig>> {
-        return apiConfigDao.getConfigsByUser(userId)
-    }
+    private val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
 
-    fun getActiveConfig(userId: Long): Flow<ApiConfig?> {
-        return apiConfigDao.getActiveConfig(userId)
-    }
+    var apiUrl: String
+        get() = prefs.getString(Constants.KEY_API_URL, "") ?: ""
+        set(value) { prefs.edit().putString(Constants.KEY_API_URL, value).apply() }
 
-    suspend fun saveConfig(config: ApiConfig): Long {
-        return apiConfigDao.insert(config)
-    }
+    var apiToken: String
+        get() = prefs.getString(Constants.KEY_API_TOKEN, "") ?: ""
+        set(value) { prefs.edit().putString(Constants.KEY_API_TOKEN, value).apply() }
 
-    suspend fun setActiveConfig(userId: Long, configId: Long) {
-        apiConfigDao.deactivateAll(userId)
-        val configs = apiConfigDao.getConfigsByUser(userId).first()
-        configs.find { it.id == configId }?.let {
-            apiConfigDao.update(it.copy(isActive = true))
-        }
-    }
+    val isConfigured: Boolean
+        get() = apiUrl.isNotBlank()
 
-    suspend fun deleteConfig(config: ApiConfig) {
-        apiConfigDao.delete(config)
+    fun clear() {
+        prefs.edit()
+            .remove(Constants.KEY_API_URL)
+            .remove(Constants.KEY_API_TOKEN)
+            .apply()
     }
 }

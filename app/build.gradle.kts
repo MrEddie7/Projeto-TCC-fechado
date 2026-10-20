@@ -1,7 +1,6 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlinCompose)
-    alias(libs.plugins.ksp)
     alias(libs.plugins.google.gms.google.services)
 }
 
@@ -60,16 +59,12 @@ dependencies {
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.navigation.compose)
 
-    implementation(libs.androidx.room.runtime)
-    implementation(libs.androidx.room.ktx)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)
     implementation(libs.firebase.database)
     implementation(libs.firebase.firestore)
     implementation(libs.googleid)
     implementation(libs.osmdroid)
-    ksp(libs.androidx.room.compiler)
-
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.gson)
     implementation(libs.okhttp)
