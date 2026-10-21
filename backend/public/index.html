@@ -239,9 +239,10 @@
 
       <section class="panel">
         <div class="head">
-          <h2>📱 Enviados pelo celular (Firestore)</h2>
+          <h2>Enviados pelo celular (Firestore)</h2>
           <div class="spacer"></div>
           <button type="button" class="small" id="btnImportCloud">Sincronizar do celular</button>
+          <button type="button" class="small" id="btnSyncFirebase">Sincronizar Firebase</button>
           <span class="chip" id="chipCloud"><span class="dot"></span><span>—</span></span>
         </div>
         <div id="phoneVehicles"><div class="empty-state">Entre para ver os veículos enviados pelo app.</div></div>
@@ -254,6 +255,15 @@
           <span class="meta" id="simMeta">—</span>
         </div>
         <div id="simulation"><div class="empty-state">Entre para gerenciar a simulação.</div></div>
+      </section>
+
+      <section class="panel">
+        <div class="head">
+          <h2>Dispositivos Móveis Registrados</h2>
+          <div class="spacer"></div>
+          <span class="meta" id="devicesMeta">—</span>
+        </div>
+        <div id="mobileDevices"><div class="empty-state">Entre para ver os dispositivos registrados.</div></div>
       </section>
 
       <section class="panel">
@@ -483,6 +493,7 @@ function renderOverview(o) {
 
   renderUsers(o.users || []);
   renderScreens(o.screens || []);
+  renderMobileDevices();
   // Mapa: guarda a última posição do celular por usuário, para exibir o
   // aparelho "junto do veículo" quando o proprietário está selecionado.
   mobileByUser = {};
@@ -594,14 +605,14 @@ function renderRealTest(o) {
     const m = u.mobileLocation;
     rows.push(`
       <div class="rt-row">
-        <b>📱 ${esc(u.name)} · celular</b>
+        <b>  ${esc(u.name)} · celular</b>
         <span class="rt-sub">${(m.latitude ?? 0).toFixed(5)}, ${(m.longitude ?? 0).toFixed(5)} · precisão ${(m.accuracy ?? 0).toFixed(1)} m · ${esc(m.source || 'app')} · ${fmtAgo(m.timestamp)}</span>
       </div>`);
   }
   for (const r of realVehicles) {
     rows.push(`
       <div class="rt-row">
-        <b>🚗 ${esc(r.vehicle.plate)} · veículo real</b>
+        <b>  ${esc(r.vehicle.plate)} · veículo real</b>
         <span class="rt-sub">${esc(r.vehicle.brand)} ${esc(r.vehicle.model)} · ${r.vehicle.online ? 'online' : 'offline'} · de ${esc(r.user.name)}</span>
       </div>`);
   }
@@ -731,6 +742,36 @@ async function importFromPhoneCloud() {
   await refreshOverview();
 }
 
+async function syncFirebase() {
+  const btn = $('btnSyncFirebase');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Sincronizando…';
+  const chip = $('chipCloud');
+  setChip(chip, 'warn', 'sincronizando');
+  try {
+    const res = await api('/v1/admin/firebase/sync', { method: 'POST' });
+    btn.disabled = false;
+    btn.textContent = label;
+    if (!res.ok) {
+      setChip(chip, 'err', 'erro: ' + (res.data.error || 'falha'));
+      alert(res.data.error || 'Falha na sincronização');
+      return;
+    }
+    const s = res.data.sync || {};
+    const u = s.users || {};
+    const d = s.mobileDevices || {};
+    setChip(chip, 'live', 'ok');
+    alert(`Sync concluída:\n• Usuários: ${u.synced || 0} sincronizados, ${u.errors || 0} erros\n• Dispositivos móveis: ${d.count || 0} replicados no RTDB`);
+    await refreshOverview();
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = label;
+    setChip(chip, 'err', 'erro');
+    alert('Erro: ' + err.message);
+  }
+}
+
 async function refreshOverview() {
   if (!state.token) return;
   const res = await api('/v1/admin/overview');
@@ -754,6 +795,37 @@ const marker = L.circleMarker([-23.5505, -46.6333], {
 const phoneMarker = L.circleMarker([-23.5505, -46.6333], {
   radius: 7, color: '#fff', weight: 1.5, fillColor: '#2979ff', fillOpacity: .95,
 });
+
+// Marcador ARRASTÁVEL (invisível até selecionar um veículo simulado).
+// Ao soltar, chama POST /v1/admin/vehicles/:id/position.
+const dragMarker = L.marker([-23.5505, -46.6333], {
+  draggable: true,
+  icon: L.divIcon({
+    className: 'drag-marker',
+    html: '<div style="width:18px;height:18px;border-radius:50%;background:#4c8dff;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3)"></div>',
+    iconSize: [24, 24], iconAnchor: [12, 12],
+  }),
+  opacity: 0, // começa invisível
+});
+dragMarker.on('dragend', async (e) => {
+  if (!state.vehicleId) return;
+  const pos = e.target.getLatLng();
+  const chip = $('chipAuth');
+  try {
+    const res = await api(`/v1/admin/vehicles/${state.vehicleId}/position`, {
+      method: 'POST',
+      body: JSON.stringify({ latitude: pos.lat, longitude: pos.lng, speed: 0 }),
+    });
+    if (!res.ok) throw new Error(res.data?.error || 'falha ao definir posição');
+    setChip(chip, 'live', 'posição definida');
+    setTimeout(() => setChip(chip, 'live', 'autenticado'), 1500);
+  } catch (err) {
+    setChip(chip, 'err', 'erro: ' + err.message);
+    dragMarker.setLatLng(marker.getLatLng());
+  }
+});
+dragMarker.addTo(map);
+
 // Camada com TODOS os veículos cadastrados (frota do administrador). Cada
 // marcador é clicável e seleciona o veículo no seletor/mapa principal.
 const fleetLayer = L.layerGroup().addTo(map);
@@ -833,6 +905,11 @@ function setHudOwner(name) {
 function moveMarker(lat, lng, animate) {
   if (lat == null || lng == null) return;
   marker.setLatLng([lat, lng]);
+  // Se o marcador arrastável está visível (veículo simulado selecionado),
+  // move-o junto para ficar sincronizado com o circleMarker.
+  if (dragMarker && dragMarker.getOpacity() === 1) {
+    dragMarker.setLatLng([lat, lng]);
+  }
   if (animate && !centered) { map.setView([lat, lng], 16); centered = true; }
   else if (animate) map.panTo([lat, lng]);
 }
@@ -875,6 +952,7 @@ function renderLogs() {
 $('follow').addEventListener('change', renderLogs);
 $('onlyErr').addEventListener('change', renderLogs);
 $('btnImportCloud').addEventListener('click', importFromPhoneCloud);
+$('btnSyncFirebase').addEventListener('click', syncFirebase);
 
 // ── Streams ──────────────────────────────────────────────────────────────
 
@@ -999,7 +1077,17 @@ async function selectVehicle(id) {
     const v = res.data.vehicle;
     setHud(v.plate, v.speed, v.latitude, v.longitude, null, v.isBlocked);
     setHudOwner(res.data.owner?.name || null);
-    if (v.latitude && v.longitude) { moveMarker(v.latitude, v.longitude, true); }
+    if (v.latitude && v.longitude) {
+      moveMarker(v.latitude, v.longitude, true);
+      // Mostra/posiciona o marcador arrastável só para veículos simulados
+      // (aqueles que o hardware-simulator.js movimenta).
+      if (v.simulated) {
+        dragMarker.setLatLng([v.latitude, v.longitude]);
+        dragMarker.setOpacity(1);
+      } else {
+        dragMarker.setOpacity(0);
+      }
+    }
     if (v.userId != null) { state.vehiclesById[id] = { userId: v.userId, plate: v.plate, ownerName: res.data.owner?.name }; }
   }
   // Re-tinge o marcador da frota para destacar o veículo selecionado.
@@ -1020,20 +1108,56 @@ function stopRefreshTimer() {
   if (state.refreshTimer) { clearInterval(state.refreshTimer); state.refreshTimer = null; }
 }
 
+// ── Autenticação (Firebase Auth via REST) ──────────────────────────────────
+// O backend não tem mais /v1/auth/login: a identidade é do Firebase. O painel
+// autentica no Identity Toolkit com e-mail/senha e usa o idToken retornado como
+// Bearer token nas chamadas à API (que o valida no Firebase Admin).
+let firebaseApiKey = null;
+
+async function loadAuthConfig() {
+  if (firebaseApiKey !== null) return firebaseApiKey;
+  const res = await api('/v1/auth/config');
+  firebaseApiKey = res.ok ? (res.data.firebaseApiKey || '') : '';
+  return firebaseApiKey;
+}
+
+async function firebaseSignIn(email, password) {
+  const key = await loadAuthConfig();
+  if (!key) return { ok: false, error: 'apiKey do Firebase não configurada no servidor' };
+  const res = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${key}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, returnSecureToken: true }),
+    }
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = data?.error?.message || 'falha no login';
+    const friendly = {
+      EMAIL_NOT_FOUND: 'e-mail não cadastrado',
+      INVALID_PASSWORD: 'senha incorreta',
+      INVALID_LOGIN_CREDENTIALS: 'e-mail ou senha inválidos',
+      USER_DISABLED: 'usuário desativado',
+      TOO_MANY_ATTEMPTS_TRY_LATER: 'muitas tentativas, tente mais tarde',
+    }[msg] || msg;
+    return { ok: false, error: friendly };
+  }
+  return { ok: true, idToken: data.idToken, email: data.email, localId: data.localId };
+}
+
 $('loginForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const btn = $('btnLogin');
   btn.disabled = true;
-  const res = await api('/v1/auth/login', {
-    method: 'POST',
-    body: JSON.stringify({ email: $('email').value.trim(), password: $('password').value }),
-  });
+  const out = await firebaseSignIn($('email').value.trim(), $('password').value);
   btn.disabled = false;
-  if (!res.ok) {
-    setChip($('chipAuth'), 'err', res.data.error || 'falha no login');
+  if (!out.ok) {
+    setChip($('chipAuth'), 'err', out.error || 'falha no login');
     return;
   }
-  state.token = res.data.token;
+  state.token = out.idToken;
   setChip($('chipAuth'), 'live', 'autenticado');
   $('btnLogout').hidden = false;
   await Promise.all([startLogStream(), loadVehicles(), refreshOverview()]);
@@ -1041,7 +1165,7 @@ $('loginForm').addEventListener('submit', async (ev) => {
 });
 
 $('btnLogout').addEventListener('click', async () => {
-  if (state.token) await api('/v1/auth/logout', { method: 'POST' });
+  // Logout é local: o payload é um ID Token autenticado no Firebase.
   state.token = null;
   stopLogStream();
   stopRefreshTimer();

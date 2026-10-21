@@ -1,115 +1,17 @@
 import { Router } from 'express';
-import { db } from '../db/database.js';
 import { requireDevice } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/error.js';
 import { HttpError } from '../util/http-error.js';
+import { firestore, rtdb } from '../services/firestore-store.js';
 import { ingestTelemetry } from '../services/telemetry.service.js';
-import {
-  getPendingCommandsForDevice,
-  acknowledgeCommand,
-} from '../services/command.service.js';
-
-const router = Router();
-
-// ── Endpoints consumidos pelo hardware (ESP32 / módulo GPS) ─────────────
-
-// POST /v1/hardware/telemetry
-// Headers: x-device-id, x-api-key
-// Body: { latitude, longitude, speed, heading, battery, timestamp }
-router.post(
-  '/telemetry',
-  requireDevice,
-  asyncHandler(async (req, res) => {
-    const { latitude, longitude, speed, heading, battery, timestamp } = req.body || {};
-    if (latitude === undefined || longitude === undefined) {
-      throw new HttpError(400, 'Informe latitude e longitude no corpo da requisição');
-    }
-    if (
-      typeof latitude !== 'number' ||
-      typeof longitude !== 'number' ||
-      latitude < -90 ||
-      latitude > 90 ||
-      longitude < -180 ||
-      longitude > 180
-    ) {
-      throw new HttpError(400, 'Coordenadas inválidas');
-    }
-    const result = ingestTelemetry({
-      device: req.device,
-      latitude,
-      longitude,
-      speed,
-      heading,
-      battery,
-      timestamp,
-    });
-    res.status(201).json({ ok: true, ...result });
-  })
-);
-
-// GET /v1/hardware/:deviceId/commands?status=pending
-// Fila de comandos aguardando execução no dispositivo.
-router.get(
-  '/:deviceId/commands',
-  requireDevice,
-  asyncHandler(async (req, res) => {
-    const status = req.query.status || 'pending';
-    if (status !== 'pending') {
-      const rows = db
-        .prepare(
-          'SELECT * FROM commands WHERE vehicle_id = ? AND status = ? ORDER BY id DESC LIMIT 50'
-        )
-        .all(Number(req.device.vehicle_id), status);
-      return res.json({ commands: rows.map((c) => ({ id: Number(c.id), command: c.command, status: c.status, note: c.note, createdAt: Number(c.created_at), acknowledgedAt: Number(c.acknowledged_at) })) });
-    }
-    res.json({ commands: getPendingCommandsForDevice(req.device) });
-  })
-);
-
-// POST /v1/hardware/:deviceId/commands/:commandId/ack
-// Body: { ok: boolean, note?: string }
-router.post(
-  '/:deviceId/commands/:commandId/ack',
-  requireDevice,
-  asyncHandler(async (req, res) => {
-    const { ok } = req.body || {};
-    const { note } = req.body || {};
-    if (typeof ok !== 'boolean') {
-      throw new HttpError(400, 'Informe ok: true (sucesso) ou ok: false (falha)');
-    }
-    const updated = acknowledgeCommand(req.device, Number(req.params.commandId), { ok, note });
-    res.json({ command: updated });
-  })
-);
-
-// GET /v1/hardware/:deviceId/status
-// Status e vínculo do dispositivo (usado no boot do firmware).
-router.get(
-  '/:deviceId/status',
-  requireDevice,
-  asyncHandler(async (req, res) => {
-    const vehicle = req.device.vehicle_id
-      ? db.prepare('SELECT * FROM vehicles WHERE id = ?').get(Number(req.device.vehicle_id))
-      : null;
-    res.json({
-      deviceId: req.device.device_id,
-      registered: true,
-      vehicle: vehicle
-        ? {
-            id: Number(vehicle.id),
-            plate: vehicle.plate,
-            model: vehicle.model,
-            isBlocked: vehicle.is_blocked === 1,
-            // O firmware usa isso para retomar a viagem de onde parou.
-            latitude: Number(vehicle.latitude),
-            longitude: Number(vehicle.longitude),
-            speed: Number(vehicle.speed),
-          }
-        : null,
-      pendingCommands: getPendingCommandsForDevice(req.device).length,
-      serverTime: Date.now(),
-    });
-  })
-);
-
+import { publishToVehicle } from '../realtime/sse.js';
+const router=Router();
+const out=c=>({id:Number(c.id),vehicleId:Number(c.vehicleId),command:c.command,status:c.status,note:c.note||'',createdAt:Number(c.createdAt),acknowledgedAt:c.acknowledgedAt||null});
+router.post('/telemetry',requireDevice,asyncHandler(async(req,res)=>{const {latitude,longitude}=req.body||{};if(typeof latitude!=='number'||typeof longitude!=='number'||latitude<-90||latitude>90||longitude<-180||longitude>180)throw new HttpError(400,'Coordenadas inválidas');res.status(201).json({ok:true,...await ingestTelemetry({...req.body,device:req.device})});}));
+router.get('/:deviceId/commands',requireDevice,asyncHandler(async(req,res)=>{const s=await firestore().collection('commands').where('vehicleId','==',Number(req.device.vehicleId)).get();const status=req.query.status||'pending';res.json({commands:s.docs.map(d=>d.data()).filter(c=>c.status===status).sort((a,b)=>a.createdAt-b.createdAt).map(out)});}));
+router.post('/:deviceId/commands/:commandId/ack',requireDevice,asyncHandler(async(req,res)=>{if(typeof req.body?.ok!=='boolean')throw new HttpError(400,'Informe ok');const ref=firestore().collection('commands').doc(String(req.params.commandId)),s=await ref.get();if(!s.exists||Number(s.data().vehicleId)!==Number(req.device.vehicleId))throw new HttpError(404,'Comando não encontrado');const now=Date.now(), c={...s.data(),status:req.body.ok?'acknowledged':'failed',note:req.body.note||s.data().note||'',acknowledgedAt:now};await ref.set(c);if(req.body.ok){const blocked=c.command==='block';await firestore().collection('vehicles').doc(String(c.vehicleId)).set({isBlocked:blocked,updatedAt:now},{merge:true});await rtdb().ref(`commands/${c.vehicleId}`).remove();publishToVehicle(c.vehicleId,'blocked',{vehicleId:c.vehicleId,isBlocked:blocked,command:c.command,timestamp:now});}res.json({command:out(c)});}));
+router.get('/:deviceId/status',requireDevice,asyncHandler(async(req,res)=>{const s=await firestore().collection('vehicles').doc(String(req.device.vehicleId)).get(),v=s.exists?s.data():null;const pending=await firestore().collection('commands').where('vehicleId','==',Number(req.device.vehicleId)).where('status','==','pending').get();res.json({deviceId:req.device.deviceId,registered:true,vehicle:v?{id:Number(v.id),plate:v.plate,model:v.model,isBlocked:v.isBlocked===true,latitude:Number(v.latitude||0),longitude:Number(v.longitude||0),speed:Number(v.speed||0)}:null,pendingCommands:pending.size,serverTime:Date.now()});}));
+// Alvo de posição definido no painel (arrastar no mapa). O simulador consulta
+// isto a cada ciclo e reancora quando o carimbo muda. 204 quando não há alvo.
+router.get('/:deviceId/position',requireDevice,asyncHandler(async(req,res)=>{const s=await rtdb().ref(`sim_control/${Number(req.device.vehicleId)}`).get();if(!s.exists())return res.status(204).end();res.json(s.val());}));
 export default router;

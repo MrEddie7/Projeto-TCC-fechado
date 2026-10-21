@@ -3,20 +3,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { notFound, errorHandler } from './middleware/error.js';
-import authRoutes from './routes/auth.routes.js';
-import vehiclesRoutes from './routes/vehicles.routes.js';
-import telemetryRoutes from './routes/telemetry.routes.js';
-import commandsRoutes from './routes/commands.routes.js';
-import routesRoutes from './routes/routes.routes.js';
-import hardwareRoutes from './routes/hardware.routes.js';
-import mobileRoutes from './routes/mobile.routes.js';
-import adminRoutes from './routes/admin.routes.js';
-import { syncOnce } from './services/firebase-sync.service.js';
-import { getFirebase, getFirebaseInitError } from './firebase/firebase-admin.js';
-import { recordRequest, listLogs, subscribeLogs, logStats } from './services/log-buffer.service.js';
-import { buildOverview } from './services/overview.service.js';
+import vehicles from './routes/vehicles.routes.js';
+import telemetry from './routes/telemetry.routes.js';
+import commands from './routes/commands.routes.js';
+import routes from './routes/routes.routes.js';
+import hardware from './routes/hardware.routes.js';
+import mobile from './routes/mobile.routes.js';
+import devices from './routes/devices.routes.js';
+import admin from './routes/admin.routes.js';
 import { requireAuth } from './middleware/auth.js';
-import { db } from './db/database.js';
+import { recordRequest, listLogs, subscribeLogs, logStats } from './services/log-buffer.service.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -34,8 +30,8 @@ export function createApp() {
     next();
   });
 
-  // Sempre registramos no buffer em memória (a página web depende dele),
-  // mas só escrevemos no console quando LOG_REQUESTS estiver ligado.
+  // Buffer em memória com as últimas requisições: o painel web (raiz /) mostra
+  // os logs ao vivo a partir daqui, sem depender dos arquivos de log.
   app.use((req, res, next) => {
     const startedAt = process.hrtime.bigint();
     res.on('finish', () => {
@@ -53,7 +49,9 @@ export function createApp() {
     next();
   });
 
-  app.get('/health', (_req, res) => res.json({ ok: true, service: 'securitas-backend', time: Date.now() }));
+  app.get('/health', (_req, res) =>
+    res.json({ ok: true, service: 'securitas-backend', storage: 'firestore', time: Date.now() })
+  );
 
   // Índice da API: referência rápida dos endpoints em /api. A raiz (/) fica
   // reservada para a aplicação web do painel (public/index.html).
@@ -61,9 +59,11 @@ export function createApp() {
     res.json({
       service: 'securitas-backend',
       description: 'API de ponte entre o hardware rastreador (GPS IoT) e o app Securitas',
+      storage: 'Firestore + Realtime Database',
+      auth: 'Firebase ID Token (app) e x-device-id/x-api-key (hardware)',
       health: '/health',
       endpoints: {
-        auth: ['POST /v1/auth/register', 'POST /v1/auth/login', 'GET /v1/auth/me', 'POST /v1/auth/logout'],
+        auth: ['GET /v1/auth/config', 'GET /v1/auth/me'],
         vehicles: [
           'GET /v1/vehicles',
           'POST /v1/vehicles',
@@ -84,7 +84,6 @@ export function createApp() {
           'POST /v1/vehicles/:id/routes/start',
           'POST /v1/vehicles/:id/routes/stop',
           'GET /v1/vehicles/:id/routes',
-          'GET /v1/routes',
           'GET /v1/routes/:id',
           'DELETE /v1/routes/:id',
         ],
@@ -94,85 +93,65 @@ export function createApp() {
           'GET /v1/hardware/:deviceId/commands',
           'POST /v1/hardware/:deviceId/commands/:commandId/ack',
         ],
-        mobile: ['POST /v1/mobile/location', 'GET /v1/mobile/location/latest'],
+        mobile: [
+          'POST /v1/mobile/location',
+          'GET /v1/mobile/location/latest',
+          'POST /v1/mobile/device',
+          'GET /v1/mobile/device',
+          'DELETE /v1/mobile/device',
+        ],
         admin: [
-          'POST /v1/admin/sync',
-          'GET /v1/admin/sync-status',
           'GET /v1/admin/overview',
           'GET /v1/admin/vehicles',
           'GET /v1/admin/vehicles/:id',
           'GET /v1/admin/vehicles/:id/telemetry/latest',
           'GET /v1/admin/vehicles/:id/telemetry/history',
           'GET /v1/admin/vehicles/:id/telemetry/stream',
+          'GET /v1/admin/vehicles/:id/simulation',
+          'POST /v1/admin/vehicles/:id/simulation',
+          'POST /v1/admin/cloud/import',
           'GET /v1/admin/logs',
           'GET /v1/admin/logs/stream',
+          'GET /v1/admin/log-stats',
         ],
       },
-      auth: 'Bearer <token> no app; headers x-device-id e x-api-key no hardware',
-      dashboard: 'GET / (painel web: usuários/veículos, status das telas, mapa e logs)',
+      dashboard: 'GET / (painel web: usuários/veículos, mapa e logs)',
       docs: 'backend/API_ESTRUTURA.txt',
     })
   );
 
-  app.use('/v1/auth', authRoutes);
-  app.use('/v1/vehicles', vehiclesRoutes);
-  app.use('/v1/vehicles', telemetryRoutes);
-  app.use('/v1/vehicles', commandsRoutes);
-  app.use('/v1', routesRoutes);
-  app.use('/v1/hardware', hardwareRoutes);
-  app.use('/v1/mobile', mobileRoutes);
+  // Configuração pública para o painel web: a apiKey do Firebase que o cliente
+  // usa no login via REST do Identity Toolkit. Não é segredo (é embutida no app).
+  app.get('/v1/auth/config', (_req, res) =>
+    res.json({ firebaseApiKey: config.firebaseApiKey || '' })
+  );
+
+  // Firebase Auth é realizado pelo SDK Android (ou pelo REST do painel web); a
+  // API somente valida o token nos demais endpoints.
+  app.get('/v1/auth/me', (req, res, next) => requireAuthSafe(req, res, next), (req, res) => res.json({ user: req.user }));
+
+  app.use('/v1/vehicles', vehicles);
+  app.use('/v1/vehicles', telemetry);
+  app.use('/v1/vehicles', commands);
+  app.use('/v1', routes);
+  app.use('/v1/hardware', hardware);
+  app.use('/v1/mobile', mobile);
+  app.use('/v1/mobile', devices);
   // Visão do administrador: qualquer veículo de qualquer usuário (painel web).
-  app.use('/v1/admin', adminRoutes);
-
-  // Força uma rodada de sincronização SQLite -> Firebase manualmente.
-  // Com ?full=1 (ou {"full":true}) zera as marcas d'água e reenvia tudo.
-  app.post('/v1/admin/sync', requireAuth, async (req, res) => {
-    const full = req.query.full === '1' || req.body?.full === true;
-    const result = await syncOnce({ full });
-    res.json({ ok: true, full, ...result });
-  });
-
-  // Painel administrativo: estado da API, usuários+veículos e saúde das telas.
-  // buildOverview é async porque também lê do Firestore as contas/veículos
-  // enviados pelo app (Express 4 não captura rejeições sozinho: usa next).
-  app.get('/v1/admin/overview', requireAuth, async (_req, res, next) => {
-    try {
-      res.json(await buildOverview());
-    } catch (e) {
-      next(e);
-    }
-  });
-
-  // Status da sincronização
-  app.get('/v1/admin/sync-status', requireAuth, (_req, res) => {
-    const rows = db.prepare('SELECT key, value FROM sync_state').all();
-    const marks = Object.fromEntries(rows.map((r) => [r.key, Number(r.value)]));
-    res.json({
-      enabled: config.firebaseSyncEnabled,
-      intervalMs: config.firebaseSyncIntervalMs,
-      lastRun: marks.last_run ?? null,
-      watermarks: { users: marks.users ?? null, vehicles: marks.vehicles ?? null, routes: marks.routes ?? null },
-      credentials: getFirebase() ? 'ok' : `ausente (${getFirebaseInitError()})`,
-    });
-  });
+  app.use('/v1/admin', admin);
 
   // Diagnóstico do buffer de logs
-  app.get('/v1/admin/log-stats', requireAuth, (_req, res) => {
-    res.json(logStats());
-  });
-
-  // Compatibilidade: a antiga página de diagnóstico vivia em /debug.
-  app.get(['/debug', '/debug/*'], (_req, res) => res.redirect(301, '/'));
+  app.get('/v1/admin/log-stats', (req, res, next) => requireAuthSafe(req, res, next), (_req, res) => res.json(logStats()));
 
   // Histórico de requisições. ?since=<seq> devolve só o que é novo.
-  app.get('/v1/admin/logs', requireAuth, (req, res) => {
+  app.get('/v1/admin/logs', (req, res, next) => requireAuthSafe(req, res, next), (req, res) => {
     const since = Number(req.query.since) || 0;
     const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
     res.json(listLogs({ since, limit }));
   });
 
   // Stream ao vivo das requisições (mesmo formato do SSE de telemetria).
-  app.get('/v1/admin/logs/stream', requireAuth, (req, res) => {
+  app.get('/v1/admin/logs/stream', (req, res, next) => requireAuthSafe(req, res, next), (_req, res) => {
     res.set({
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
@@ -182,6 +161,9 @@ export function createApp() {
     subscribeLogs(res);
   });
 
+  // Compatibilidade: a antiga página de diagnóstico vivia em /debug.
+  app.get(['/debug', '/debug/*'], (_req, res) => res.redirect(301, '/'));
+
   // Aplicação web do painel: HTML+JS puro servido na raiz (sem build/framework).
   app.use(express.static(path.join(__dirname, '..', 'public')));
 
@@ -189,4 +171,10 @@ export function createApp() {
   app.use(errorHandler);
 
   return app;
+}
+
+// requireAuth é async (verifica o ID Token no Firebase Admin). O Express 4 não
+// captura rejeições de handlers async sozinho, então envolvemos a chamada.
+function requireAuthSafe(req, res, next) {
+  return Promise.resolve(requireAuth(req, res, next)).catch(next);
 }

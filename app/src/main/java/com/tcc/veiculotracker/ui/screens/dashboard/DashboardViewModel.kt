@@ -16,7 +16,8 @@ data class DashboardState(
     val activeVehicles: Int = 0,
     val blockedVehicles: Int = 0,
     val vehicles: List<VehicleModel> = emptyList(),
-    val isLoading: Boolean = true
+    val isLoading: Boolean = true,
+    val error: String? = null
 )
 
 class DashboardViewModel(application: Application) : AndroidViewModel(application) {
@@ -49,15 +50,26 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         _state.value = _state.value.copy(userName = userName)
 
         viewModelScope.launch {
-            vehicleRepository.getVehiclesByUser(userId).collect { vehicles ->
-                _state.value = _state.value.copy(
-                    vehicles        = vehicles,
-                    totalVehicles   = vehicles.size,
-                    activeVehicles  = vehicles.count { !it.isBlocked },
-                    blockedVehicles = vehicles.count { it.isBlocked },
-                    isLoading       = false
-                )
-            }
+            vehicleRepository.getVehiclesByUser(userId)
+                .catch { e ->
+                    // Ex.: PERMISSION_DENIED nas regras do Firestore. Não deve
+                    // derrubar o app: encerra o loading e mostra a frota vazia.
+                    _state.value = _state.value.copy(
+                        vehicles  = emptyList(),
+                        isLoading = false,
+                        error     = e.message ?: "Erro ao carregar veículos"
+                    )
+                }
+                .collect { vehicles ->
+                    _state.value = _state.value.copy(
+                        vehicles        = vehicles,
+                        totalVehicles   = vehicles.size,
+                        activeVehicles  = vehicles.count { !it.isBlocked },
+                        blockedVehicles = vehicles.count { it.isBlocked },
+                        isLoading       = false,
+                        error           = null
+                    )
+                }
         }
     }
 }

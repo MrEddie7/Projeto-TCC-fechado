@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { randomBytes } from 'node:crypto';
-import { db } from '../db/database.js';
+import { getFirebase } from '../firebase/firebase-admin.js';
 import { requireAuth } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/error.js';
 import { HttpError } from '../util/http-error.js';
@@ -11,205 +11,86 @@ import {
 
 const router = Router();
 router.use(requireAuth);
+const PLATE = /^[A-Z]{3}\d[A-Z0-9]\d{2}$|^[A-Z]{3}-\d{4}$/;
+const id = () => Date.now() * 100 + Math.floor(Math.random() * 100);
 
-const PLATE_REGEX = /^[A-Z]{3}\d[A-Z0-9]\d{2}$|^[A-Z]{3}-\d{4}$/;
-
-export function serializeVehicle(row) {
+export function serializeVehicle(v) {
   return {
-    id: Number(row.id),
-    userId: Number(row.user_id),
-    plate: row.plate,
-    model: row.model,
-    brand: row.brand,
-    year: Number(row.year),
-    color: row.color,
-    isBlocked: row.is_blocked === 1,
-    simulated: row.simulated === 1,
-    // 'backend' = criado pela API; 'firestore' = importado do celular.
-    origin: row.origin || 'backend',
-    // source espelha origin para manter consistência com os veículos vindos
-    // diretamente do Firestore (que recebem source='firestore' no mergeCloudAccounts).
-    source: row.origin || 'backend',
-    latitude: row.latitude,
-    longitude: row.longitude,
-    speed: row.speed,
-    lastUpdate: Number(row.last_update),
-    createdAt: Number(row.created_at),
-    updatedAt: Number(row.updated_at || 0),
+    id: Number(v.id),
+    // Identidade é o ownerUid (string). userId espelha o uid para o app, que
+    // ainda usa Long nos modelos antigos (o hashCode do uid é a ponte).
+    userId: v.userId ?? v.ownerUid ?? 0,
+    ownerUid: v.ownerUid ?? null,
+    plate: v.plate,
+    model: v.model, brand: v.brand, year: Number(v.year), color: v.color || '',
+    isBlocked: v.isBlocked === true, latitude: Number(v.latitude || 0),
+    longitude: Number(v.longitude || 0), speed: Number(v.speed || 0),
+    lastUpdate: Number(v.lastUpdate || 0), createdAt: Number(v.createdAt || 0),
   };
 }
-
-export function serializeDevice(row) {
-  if (!row) return null;
-  return {
-    id: Number(row.id),
-    deviceId: row.device_id,
-    apiKey: row.api_key,
-    simulated: row.simulated === 1,
-    vehicleId: row.vehicle_id === null ? null : Number(row.vehicle_id),
-    firmware: row.firmware,
-    model: row.model,
-    lastSeen: Number(row.last_seen),
-    createdAt: Number(row.created_at),
-  };
+export function serializeDevice(d) {
+  if (!d) return null;
+  return { id: d.deviceId, deviceId: d.deviceId, apiKey: d.apiKey,
+    vehicleId: Number(d.vehicleId), firmware: d.firmware || '', model: d.model || '',
+    lastSeen: Number(d.lastSeen || 0), createdAt: Number(d.createdAt || 0) };
+}
+async function owned(uid, vehicleId) {
+  const snap = await getFirebase().firestore.collection('vehicles').doc(String(vehicleId)).get();
+  if (!snap.exists || snap.data().ownerUid !== uid) throw new HttpError(404, 'Veículo não encontrado');
+  return snap.data();
 }
 
-function assertOwnsVehicle(userId, vehicleId) {
-  const v = db.prepare('SELECT * FROM vehicles WHERE id = ? AND user_id = ?').get(vehicleId, userId);
-  if (!v) throw new HttpError(404, 'Veículo não encontrado');
-  return v;
-}
+router.get('/', asyncHandler(async (req, res) => {
+  const snap = await getFirebase().firestore.collection('vehicles').where('ownerUid', '==', req.user.uid).get();
+  res.json({ vehicles: snap.docs.map(d => serializeVehicle(d.data())).sort((a,b) => b.createdAt-a.createdAt) });
+}));
+router.get('/:id', asyncHandler(async (req, res) => {
+  const vehicle = await owned(req.user.uid, req.params.id);
+  const devices = await getFirebase().firestore.collection('devices').where('vehicleId', '==', Number(vehicle.id)).limit(1).get();
+  res.json({ vehicle: serializeVehicle(vehicle), device: devices.empty ? null : serializeDevice(devices.docs[0].data()) });
+}));
+router.post('/', asyncHandler(async (req,res) => {
+  const { plate, model, brand, year, color = '' } = req.body || {};
+  const normalized = String(plate || '').trim().toUpperCase().replace(/\s+/g, '');
+  if (!model || !brand || !PLATE.test(normalized)) throw new HttpError(400, 'Dados do veículo inválidos');
+  const duplicate = await getFirebase().firestore.collection('vehicles').where('ownerUid','==',req.user.uid).where('plate','==',normalized).limit(1).get();
+  if (!duplicate.empty) throw new HttpError(409, 'Já existe um veículo com esta placa');
+  const now=Date.now(), vehicle={ id:id(), userId:req.user.uid, ownerUid:req.user.uid, plate:normalized, model:String(model), brand:String(brand), year:Number(year), color:String(color), isBlocked:false, latitude:0, longitude:0, speed:0, lastUpdate:0, createdAt:now, updatedAt:now };
+  await getFirebase().firestore.collection('vehicles').doc(String(vehicle.id)).set(vehicle);
+  res.status(201).json({ vehicle:serializeVehicle(vehicle) });
+}));
+router.put('/:id', asyncHandler(async (req,res) => {
+  const old=await owned(req.user.uid,req.params.id);
+  const next={...old, ...Object.fromEntries(['model','brand','color','year','plate'].filter(k=>req.body?.[k]!==undefined).map(k=>[k,k==='plate'?String(req.body[k]).toUpperCase():req.body[k]])), updatedAt:Date.now()};
+  await getFirebase().firestore.collection('vehicles').doc(String(old.id)).set(next);
+  res.json({vehicle:serializeVehicle(next)});
+}));
+router.delete('/:id', asyncHandler(async (req,res) => {
+  const v=await owned(req.user.uid,req.params.id);
+  await getFirebase().firestore.collection('vehicles').doc(String(v.id)).delete();
+  res.json({ok:true});
+}));
+router.post('/:id/device', asyncHandler(async (req,res) => {
+  const v=await owned(req.user.uid,req.params.id), fs=getFirebase().firestore;
+  const found=await fs.collection('devices').where('vehicleId','==',Number(v.id)).limit(1).get();
+  if (!found.empty) return res.status(409).json({error:'Este veículo já possui um dispositivo',device:serializeDevice(found.docs[0].data())});
+  const now=Date.now(), deviceId=`vt_${randomBytes(8).toString('hex')}`, device={deviceId,apiKey:randomBytes(24).toString('hex'),vehicleId:Number(v.id),firmware:'',model:'',lastSeen:0,createdAt:now};
+  await fs.collection('devices').doc(deviceId).set(device);
+  res.status(201).json({device:serializeDevice(device)});
+}));
 
-// Listar veículos do usuário
-router.get(
-  '/',
-  asyncHandler(async (req, res) => {
-    const rows = db
-      .prepare('SELECT * FROM vehicles WHERE user_id = ? ORDER BY created_at DESC')
-      .all(req.user.id);
-    res.json({ vehicles: rows.map(serializeVehicle) });
-  })
-);
-
-// Detalhe + dispositivo vinculado
-router.get(
-  '/:id',
-  asyncHandler(async (req, res) => {
-    const v = assertOwnsVehicle(req.user.id, req.params.id);
-    const device = db.prepare('SELECT * FROM devices WHERE vehicle_id = ?').get(v.id);
-    res.json({ vehicle: serializeVehicle(v), device: serializeDevice(device) });
-  })
-);
-
-// Cadastrar veículo
-router.post(
-  '/',
-  asyncHandler(async (req, res) => {
-    const { plate, model, brand, year, color } = req.body || {};
-    if (!plate || !model || !brand || !year) {
-      throw new HttpError(400, 'Informe plate, model, brand e year');
-    }
-    const plateStr = String(plate)
-      .trim()
-      .toUpperCase()
-      .replace(/\s+/g, '');
-    if (!PLATE_REGEX.test(plateStr)) {
-      throw new HttpError(400, 'Placa inválida (use formato Mercosul: ABC1D23 ou ABC-1234)');
-    }
-    const yearNum = Number(year);
-    if (!Number.isInteger(yearNum) || yearNum < 1950 || yearNum > new Date().getFullYear() + 1) {
-      throw new HttpError(400, 'Ano do veículo inválido');
-    }
-    const existing = db.prepare('SELECT id FROM vehicles WHERE user_id = ? AND plate = ?').get(
-      req.user.id,
-      plateStr
-    );
-    if (existing) throw new HttpError(409, 'Já existe um veículo com esta placa');
-
-    const now = Date.now();
-    const info = db
-      .prepare(
-        `INSERT INTO vehicles (user_id, plate, model, brand, year, color, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(req.user.id, plateStr, model.trim(), brand.trim(), yearNum, color?.trim() || '', now, now);
-    const v = db.prepare('SELECT * FROM vehicles WHERE id = ?').get(Number(info.lastInsertRowid));
-    res.status(201).json({ vehicle: serializeVehicle(v) });
-  })
-);
-
-// Atualizar veículo
-router.put(
-  '/:id',
-  asyncHandler(async (req, res) => {
-    const v = assertOwnsVehicle(req.user.id, req.params.id);
-    const { plate, model, brand, year, color } = req.body || {};
-    const plateStr = plate ? String(plate).trim().toUpperCase().replace(/\s+/g, '') : v.plate;
-    if (plate && !PLATE_REGEX.test(plateStr)) {
-      throw new HttpError(400, 'Placa inválida (use formato Mercosul: ABC1D23 ou ABC-1234)');
-    }
-    const yearNum = year === undefined ? Number(v.year) : Number(year);
-    db.prepare(
-      `UPDATE vehicles SET plate = ?, model = ?, brand = ?, year = ?, color = ?, updated_at = ? WHERE id = ?`
-    ).run(
-      plateStr,
-      model?.trim() || v.model,
-      brand?.trim() || v.brand,
-      yearNum,
-      color?.trim() ?? v.color,
-      Date.now(),
-      v.id
-    );
-    const updated = db.prepare('SELECT * FROM vehicles WHERE id = ?').get(v.id);
-    res.json({ vehicle: serializeVehicle(updated) });
-  })
-);
-
-// Excluir veículo
-router.delete(
-  '/:id',
-  asyncHandler(async (req, res) => {
-    const v = assertOwnsVehicle(req.user.id, req.params.id);
-    db.prepare('DELETE FROM vehicles WHERE id = ?').run(v.id);
-    res.json({ ok: true });
-  })
-);
-
-// Gerar credenciais do dispositivo / hardware (ESP32, módulo GPS) para o veículo.
-// Retorna deviceId e apiKey que devem ser gravados no firmware.
-router.post(
-  '/:id/device',
-  asyncHandler(async (req, res) => {
-    const v = assertOwnsVehicle(req.user.id, req.params.id);
-    const existing = db.prepare('SELECT * FROM devices WHERE vehicle_id = ?').get(v.id);
-    if (existing) {
-      res.status(409).json({
-        error: 'Este veículo já possui um dispositivo',
-        device: serializeDevice(existing),
-      });
-      return;
-    }
-    const deviceId = `vt_${randomBytes(8).toString('hex')}`;
-    const apiKey = randomBytes(24).toString('hex');
-    const now = Date.now();
-    const info = db
-      .prepare(
-        `INSERT INTO devices (device_id, api_key, vehicle_id, created_at)
-         VALUES (?, ?, ?, ?)`
-      )
-      .run(deviceId, apiKey, v.id, now);
-    const device = db.prepare('SELECT * FROM devices WHERE id = ?').get(Number(info.lastInsertRowid));
-    res.status(201).json({ device: serializeDevice(device) });
-  })
-);
-
-// Consultar a decisão de simulação do veículo.
-// O app chama isto logo após criar o veículo, para "perguntar ao backend"
-// se ele deve entrar na frota simulada.
-router.get(
-  '/:id/simulation',
-  asyncHandler(async (req, res) => {
-    const v = assertOwnsVehicle(req.user.id, req.params.id);
-    res.json({ simulation: getSimulationDecision(v) });
-  })
-);
-
-// Aplicar a escolha do app: { simulate: true | false }.
-router.post(
-  '/:id/simulation',
-  asyncHandler(async (req, res) => {
-    const v = assertOwnsVehicle(req.user.id, req.params.id);
-    const simulate = req.body?.simulate;
-    if (typeof simulate !== 'boolean') {
-      throw new HttpError(400, 'Informe simulate: true (simular) ou false (teste real)');
-    }
-    const { vehicle, device } = applySimulationDecision(v, simulate);
-    res.json({
-      simulation: getSimulationDecision(vehicle),
-      vehicle: serializeVehicle(vehicle),
-      device: serializeDevice(device),
-    });
-  })
-);
-
+// ── Simulação do veículo ────────────────────────────────────────────────
+// O app pergunta, logo após cadastrar um veículo, se ele deve entrar na frota
+// simulada (rastreador virtual movido pelo simulador de hardware).
+router.get('/:id/simulation', asyncHandler(async (req,res) => {
+  const v=await owned(req.user.uid,req.params.id), fs=getFirebase().firestore;
+  const found=await fs.collection('devices').where('vehicleId','==',Number(v.id)).limit(1).get();
+  res.json({simulation:getSimulationDecision(v, found.empty?null:found.docs[0].data())});
+}));
+router.post('/:id/simulation', asyncHandler(async (req,res) => {
+  const v=await owned(req.user.uid,req.params.id), simulate=req.body?.simulate;
+  if (typeof simulate!=='boolean') throw new HttpError(400,'Informe simulate: true (simular) ou false (teste real)');
+  const {vehicle,device}=await applySimulationDecision(v,simulate);
+  res.json({simulation:getSimulationDecision(vehicle,device),vehicle:serializeVehicle(vehicle),device:serializeDevice(device)});
+}));
 export default router;

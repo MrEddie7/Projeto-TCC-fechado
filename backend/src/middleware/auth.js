@@ -1,21 +1,35 @@
-import { getUserByToken } from '../services/auth.service.js';
-import { db } from '../db/database.js';
+import { getFirebase } from '../firebase/firebase-admin.js';
 
-export function requireAuth(req, res, next) {
+export async function requireAuth(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) {
     return res.status(401).json({ error: 'Token de autenticação obrigatório' });
   }
-  const user = getUserByToken(token);
-  if (!user) {
-    return res.status(401).json({ error: 'Token inválido ou expirado' });
+  try {
+    const fb = getFirebase();
+    if (!fb) throw new Error('Firebase indisponível');
+    const claims = await fb.auth.verifyIdToken(token);
+    req.user = {
+      uid: claims.uid,
+      email: claims.email || '',
+      name: claims.name || claims.email?.split('@')[0] || 'Usuário',
+      phone: claims.phone_number || '',
+    };
+    await fb.firestore.collection('users').doc(claims.uid).set({
+      firebaseUid: claims.uid,
+      email: req.user.email,
+      name: req.user.name,
+      phone: req.user.phone,
+      updatedAt: Date.now(),
+    }, { merge: true });
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Token Firebase inválido ou expirado' });
   }
-  req.user = user;
-  next();
 }
 
-export function requireDevice(req, res, next) {
+export async function requireDevice(req, res, next) {
   const deviceId = req.headers['x-device-id'];
   const apiKey = req.headers['x-api-key'] || req.body?.apiKey;
   if (!deviceId || !apiKey) {
@@ -23,10 +37,10 @@ export function requireDevice(req, res, next) {
       .status(401)
       .json({ error: 'Headers x-device-id e x-api-key são obrigatórios' });
   }
-  const device = db
-    .prepare('SELECT * FROM devices WHERE device_id = ? AND api_key = ?')
-    .get(deviceId, apiKey);
-  if (!device) {
+  const fb = getFirebase();
+  const snap = await fb?.firestore.collection('devices').doc(String(deviceId)).get();
+  const device = snap?.exists ? { deviceId: snap.id, ...snap.data() } : null;
+  if (!device || device.apiKey !== apiKey) {
     return res.status(403).json({ error: 'Dispositivo não autorizado' });
   }
   req.device = device;

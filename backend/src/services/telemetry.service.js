@@ -1,89 +1,26 @@
-import { db } from '../db/database.js';
-import { config } from '../config.js';
+import { firestore, rtdb, makeId } from './firestore-store.js';
 import { publishToVehicle } from '../realtime/sse.js';
 import { haversine } from '../util/geo.js';
 
-// Escreve a telemetria do dispositivo, atualiza a última posição do veículo,
-// registra o ponto na rota em andamento e avisa o app em tempo real (SSE).
-export function ingestTelemetry({ device, latitude, longitude, speed, heading, battery, timestamp }) {
-  const deviceRow = device || null;
-  const vehicleId = deviceRow?.vehicle_id ?? null;
-
-  const ts = timestamp || Date.now();
-  const normSpeed = Math.max(0, Number(speed) || 0);
-  const lat = Number(latitude);
-  const lng = Number(longitude);
-
-  if (deviceRow) {
-    db.prepare('UPDATE devices SET last_seen = ? WHERE id = ?').run(ts, deviceRow.id);
+export async function ingestTelemetry({ device, latitude, longitude, speed, heading, battery, timestamp }) {
+  const vehicleId=Number(device.vehicleId), ts=Number(timestamp)||Date.now();
+  const point={id:makeId(),vehicleId,latitude:Number(latitude),longitude:Number(longitude),speed:Math.max(0,Number(speed)||0),heading:Number(heading)||0,battery:battery==null?null:Number(battery),timestamp:ts};
+  const fs=firestore(), vehicleRef=fs.collection('vehicles').doc(String(vehicleId));
+  await fs.collection('telemetry').doc(String(point.id)).set(point);
+  const vehicleSnap=await vehicleRef.get();
+  if (!vehicleSnap.exists) throw new Error('Veículo do dispositivo não encontrado');
+  const vehicle={...vehicleSnap.data(),latitude:point.latitude,longitude:point.longitude,speed:point.speed,lastUpdate:ts,updatedAt:Date.now()};
+  await vehicleRef.set(vehicle);
+  await fs.collection('devices').doc(device.deviceId).set({...device,lastSeen:ts},{merge:true});
+  await rtdb().ref(`telemetry/${vehicleId}`).set(point);
+  const active=await fs.collection('routes').where('vehicleId','==',vehicleId).where('status','==','em_andamento').limit(1).get();
+  if (!active.empty) {
+    const route=active.docs[0].data(), points=await active.docs[0].ref.collection('points').orderBy('timestamp','desc').limit(1).get();
+    const previous=points.empty?null:points.docs[0].data();
+    const distance=Number(route.distance||0)+(previous?haversine(previous.latitude,previous.longitude,point.latitude,point.longitude):0);
+    await active.docs[0].ref.collection('points').doc(String(point.id)).set(point);
+    await active.docs[0].ref.set({...route,distance,maxSpeed:Math.max(Number(route.maxSpeed||0),point.speed),endLatitude:point.latitude,endLongitude:point.longitude,updatedAt:Date.now()});
   }
-
-  let pointId = null;
-  if (vehicleId) {
-    const info = db
-      .prepare(
-        `INSERT INTO telemetry (vehicle_id, device_id, latitude, longitude, speed, heading, battery, timestamp)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(vehicleId, deviceRow?.device_id, lat, lng, normSpeed, Number(heading) || 0, battery ?? null, ts);
-    pointId = Number(info.lastInsertRowid);
-
-    // Limita o histórico para não crescer sem limite (configurável via env).
-    db.prepare(
-      `DELETE FROM telemetry WHERE vehicle_id = ? AND id NOT IN (
-         SELECT id FROM telemetry WHERE vehicle_id = ? ORDER BY timestamp DESC LIMIT ?
-       )`
-    ).run(vehicleId, vehicleId, config.maxTelemetryPoints);
-
-    db.prepare(
-      `UPDATE vehicles
-       SET latitude = ?, longitude = ?, speed = ?, last_update = ?, updated_at = ?
-       WHERE id = ?`
-    ).run(lat, lng, normSpeed, ts, Date.now(), vehicleId);
-
-    appendToActiveRoute(vehicleId, lat, lng, normSpeed, heading || 0, ts);
-
-    publishToVehicle(vehicleId, 'telemetry', {
-      vehicleId: Number(vehicleId),
-      latitude: lat,
-      longitude: lng,
-      speed: normSpeed,
-      heading: Number(heading) || 0,
-      battery: battery ?? null,
-      timestamp: ts,
-    });
-  }
-
-  return { vehicleId: vehicleId ? Number(vehicleId) : null, pointId, timestamp: ts };
-}
-
-function appendToActiveRoute(vehicleId, lat, lng, speed, heading, ts) {
-  const route = db
-    .prepare(
-      `SELECT * FROM routes WHERE vehicle_id = ? AND status = 'em_andamento' ORDER BY id DESC LIMIT 1`
-    )
-    .get(vehicleId);
-  if (!route) return;
-
-  const lastPoint = db
-    .prepare(
-      'SELECT * FROM route_points WHERE route_id = ? ORDER BY timestamp DESC LIMIT 1'
-    )
-    .get(Number(route.id));
-
-  db.prepare(
-    `INSERT INTO route_points (route_id, latitude, longitude, speed, heading, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(Number(route.id), lat, lng, speed, heading, ts);
-
-  let distance = Number(route.distance) || 0;
-  if (lastPoint) {
-    distance += haversine(lastPoint.latitude, lastPoint.longitude, lat, lng);
-  }
-
-  db.prepare(
-    `UPDATE routes SET distance = ?, max_speed = MAX(max_speed, ?),
-       end_latitude = ?, end_longitude = ?, updated_at = ?
-     WHERE id = ?`
-  ).run(distance, speed, lat, lng, Date.now(), Number(route.id));
+  publishToVehicle(vehicleId,'telemetry',point);
+  return {vehicleId,pointId:point.id,timestamp:ts};
 }

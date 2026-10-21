@@ -64,9 +64,19 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
 
     private fun loadVehicles() {
         viewModelScope.launch {
-            vehicleRepository.getVehiclesByUser(userId).collect { vehicles ->
-                _state.value = _state.value.copy(vehicles = vehicles, isLoading = false)
-            }
+            vehicleRepository.getVehiclesByUser(userId)
+                .catch { e ->
+                    // Ex.: PERMISSION_DENIED nas regras do Firestore. Degrada
+                    // para lista vazia em vez de derrubar o app.
+                    _state.value = _state.value.copy(
+                        vehicles  = emptyList(),
+                        isLoading = false,
+                        error     = e.message ?: "Erro ao carregar veículos"
+                    )
+                }
+                .collect { vehicles ->
+                    _state.value = _state.value.copy(vehicles = vehicles, isLoading = false)
+                }
         }
     }
 
@@ -132,17 +142,11 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
                             currentLongitude = telemetry.longitude,
                             error = null
                         )
-                        vehicleRepository.updateLocation(
-                            vehicle.id,
-                            telemetry.latitude,
-                            telemetry.longitude,
-                            telemetry.speed,
-                            vehicle.copy(
-                                latitude  = telemetry.latitude,
-                                longitude = telemetry.longitude,
-                                speed     = telemetry.speed
-                            )
-                        )
+                        // Só atualiza o estado na tela. NÃO regrava no Firestore:
+                        // o documento do veículo é a fonte da verdade e é
+                        // atualizado pela API/simulador. Regravar aqui sobrescreveria
+                        // o lastUpdate com dados de subscriber e apagaria a
+                        // telemetria real do servidor.
                     }
                 }.onFailure { e ->
                     _state.value = _state.value.copy(
@@ -176,17 +180,7 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
                     currentLongitude = telemetry.longitude,
                     error = null
                 )
-                vehicleRepository.updateLocation(
-                    vehicle.id,
-                    telemetry.latitude,
-                    telemetry.longitude,
-                    telemetry.speed,
-                    vehicle.copy(
-                        latitude  = telemetry.latitude,
-                        longitude = telemetry.longitude,
-                        speed     = telemetry.speed
-                    )
-                )
+                // Mesma regra do polling: não regravar o veículo no Firestore.
             }
     }
 

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Política de segurança de rede do app.
+
+  Por padrão o Android bloqueia HTTP em texto claro (cleartext). Como o backend
+  do TCC roda em HTTP durante o desenvolvimento (ex.: http://localhost:3000 via
+  `adb reverse`, ou o IP da máquina na rede local), liberamos o texto claro
+  APENAS para esses destinos de desenvolvimento. Todo o restante continua
+  exigindo HTTPS.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- `adb reverse tcp:3000 tcp:3000` faz o app enxergar a API como localhost -->
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <!-- Emulador Android -> máquina host -->
+        <domain includeSubdomains="false">10.0.2.2</domain>
+        <!-- Rede local do TCC (ex.: http://192.168.0.10:3000) -->
+        <domain includeSubdomains="false">192.168.0.10</domain>
+    </domain-config>
+</network-security-config>

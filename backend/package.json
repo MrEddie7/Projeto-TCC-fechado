@@ -11,8 +11,6 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "simulator": "node src/hardware-simulator.js",
-    "seed": "node src/seed.js",
-    "test": "node tests/e2e.js",
     "api": "./api.sh start",
     "api:stop": "./api.sh stop",
     "api:restart": "./api.sh restart",

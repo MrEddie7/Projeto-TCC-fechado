@@ -1,5 +1,6 @@
 import fs from 'node:fs';
-import { initializeApp, applicationDefault, cert, getApps, deleteApp } from 'firebase-admin/app';
+import { initializeApp, applicationDefault, cert, getApps } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getDatabase } from 'firebase-admin/database';
 import { config } from '../config.js';
@@ -8,16 +9,9 @@ let cached = null;
 let initialized = false;
 let initError = null;
 
-// Inicializa (uma única vez) o SDK Admin com a conta de serviço.
-// Retorna null se a sincronização estiver desativada ou sem credenciais.
+// Inicializa (uma única vez) o SDK Admin. Firestore é o banco principal da API.
 export function getFirebase() {
   if (cached !== null) return cached;
-
-  if (!config.firebaseSyncEnabled) {
-    initError = null;
-    cached = null;
-    return null;
-  }
 
   if (!initialized) {
     initialized = true;
@@ -45,9 +39,7 @@ export function getFirebase() {
       const appOptions = { credential };
       if (config.firebaseDatabaseUrl) appOptions.databaseURL = config.firebaseDatabaseUrl;
 
-      const existing = getApps()[0];
-      if (existing) deleteApp(existing);
-      const app = initializeApp(appOptions);
+      const app = getApps()[0] || initializeApp(appOptions);
 
 // O app Android usa FirebaseFirestore.getInstance("securitas"):
 // uma instância nomeada do Firestore. O SDK Admin recebe o
@@ -59,11 +51,17 @@ export function getFirebase() {
         firestore = getFirestore(app, '(default)');
       }
 
-      const rtdb = config.firebaseDatabaseUrl ? getDatabase(app) : null;
+      if (!config.firebaseDatabaseUrl) {
+        throw new Error('FIREBASE_DATABASE_URL é obrigatório para telemetria e localização móvel');
+      }
+      const rtdb = getDatabase(app);
+      const auth = getAuth(app);
 
-      cached = { app, firestore, rtdb };
-      console.log(
-        `[firebase] inicializado (Firestore db="${config.firestoreId}", RTDB=${rtdb ? 'sim' : 'não'})`
+      cached = { app, firestore, rtdb, auth };
+      // stderr: é diagnóstico. O stdout é reservado para dados de programa
+      // (ex.: o TSV do list-devices.js consumido pelo api.sh).
+      console.error(
+        `[firebase] inicializado (Firestore db="${config.firestoreId}", RTDB=sim)`
       );
     } catch (e) {
       initError = e;

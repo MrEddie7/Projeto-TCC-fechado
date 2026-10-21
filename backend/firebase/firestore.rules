@@ -1,0 +1,65 @@
+rules_version = '2';
+
+// ============================================================================
+// SECURITAS - Regras do Cloud Firestore (banco "securitas")
+// ----------------------------------------------------------------------------
+// O backend (Admin SDK) IGNORA estas regras: só o app Android é afetado.
+// Princípio: exige autenticação (Firebase Auth) e restringe cada conta aos
+// seus próprios dados.
+// ============================================================================
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Conta: cada usuário só lê/escreve o próprio documento (uid do token).
+    match /users/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Dispositivo móvel do app: chave é o próprio uid.
+    match /mobile_devices/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Veículos: o dono é o ownerUid gravado no documento. O app só vê e
+    // altera os seus; ao criar, o ownerUid precisa ser o próprio uid.
+    match /vehicles/{vehicleId} {
+      allow read:  if isSignedIn() && resource.data.ownerUid == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow update, delete: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
+    }
+
+    // Rotas: o app escreve no início/fim do trajeto e lê o próprio histórico.
+    // userId/ownerUid recebem o uid da conta.
+    match /routes/{routeId} {
+      allow read:  if isSignedIn() &&
+        (resource.data.ownerUid == request.auth.uid || resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() &&
+        (request.resource.data.ownerUid == request.auth.uid || request.resource.data.userId == request.auth.uid);
+      allow update, delete: if isSignedIn() &&
+        (resource.data.ownerUid == request.auth.uid || resource.data.userId == request.auth.uid);
+    }
+
+    // Coleções operacionais gravadas SOMENTE pelo backend (Admin SDK, que
+    // ignora estas regras). O app apenas lê o que for do seu veículo — na
+    // prática o app usa o RTDB para telemetria/comandos, mas mantemos a
+    // leitura autenticada para telas que consultem o Firestore.
+    match /telemetry/{pointId} {
+      allow read: if isSignedIn();
+    }
+    match /route_points/{pointId} {
+      allow read: if isSignedIn();
+    }
+    match /commands/{commandId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+    }
+    match /devices/{deviceId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+    }
+  }
+}

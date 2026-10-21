@@ -10,6 +10,7 @@ import com.tcc.veiculotracker.data.model.VehicleModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 
 class VehicleDetailViewModel(
@@ -28,9 +29,11 @@ class VehicleDetailViewModel(
 
     private fun loadVehicle() {
         viewModelScope.launch {
-            vehicleRepository.getVehiclesByUser(-1).collect { list ->
-                _vehicle.value = list.firstOrNull { it.id == vehicleId }
-            }
+            vehicleRepository.getVehiclesByUser(-1)
+                .catch { _vehicle.value = null }
+                .collect { list ->
+                    _vehicle.value = list.firstOrNull { it.id == vehicleId }
+                }
         }
     }
 }

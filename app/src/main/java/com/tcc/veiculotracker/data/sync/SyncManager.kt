@@ -39,6 +39,15 @@ class SyncManager(
 
     // ── Veículos ─────────────────────────────────────────────────────────────
 
+    /**
+     * Publica um veículo no Firestore.
+     *
+     * ATENÇÃO: o Firestore é a fonte da verdade e o documento do veículo é
+     * atualizado pela API (telemetria, bloqueio, simulação). Fazer `set`
+     * completo com um VehicleModel obtido de um Flow/observer sobrescreveria
+     * esses campos com valores defasados — por isso só publicamos o que o app
+     * realmente cria/edita (cadastro, edição cadastral e exclusão).
+     */
     suspend fun syncVehicle(vehicle: VehicleModel) {
         runCatching { firebaseDataSource.syncVehicle(vehicle) }
     }
@@ -48,14 +57,9 @@ class SyncManager(
      * Retorna o número enviado.
      */
     suspend fun syncVehiclesToCloud(userId: Long): Int {
-        val vehicles = runCatching {
-            firebaseDataSource.getVehiclesOnce(userId)
-        }.getOrDefault(emptyList())
-        var sent = 0
-        for (v in vehicles) {
-            runCatching { firebaseDataSource.syncVehicle(v) }.onSuccess { sent++ }
-        }
-        return sent
+        // Firestore já é a fonte de verdade; regravar os mesmos documentos
+        // não sincroniza nada e pode sobrescrever alterações mais recentes.
+        return 0
     }
 
     suspend fun deleteVehicle(vehicleId: Long) {

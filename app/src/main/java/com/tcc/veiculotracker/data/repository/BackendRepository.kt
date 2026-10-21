@@ -1,6 +1,7 @@
 package com.tcc.veiculotracker.data.repository
 
 import android.content.Context
+import android.os.Build
 import android.util.Log
 import com.tcc.veiculotracker.data.model.VehicleModel
 import com.tcc.veiculotracker.data.remote.ApiClient
@@ -10,6 +11,10 @@ import com.tcc.veiculotracker.util.Constants
  * Repositório que gerencia a comunicação com o backend Node.js.
  * Room foi removido — não há mais DAO. Os veículos retornados pelo backend
  * são passados diretamente ao Firestore via SyncManager (VehicleRepository).
+ *
+ * A autenticação (e a sessão) agora é do Firebase Auth: o backend recebe o ID
+ * Token do Firebase no header Authorization. Por isso [register]/[login] abaixo
+ * são apenas atalhos opcionais — o app NÃO cria sessão paralela no backend.
  */
 class BackendRepository(
     private val context: Context
@@ -30,35 +35,44 @@ class BackendRepository(
     val isConfigured: Boolean
         get() = apiClient.isConfigured
 
+    // Mantidos por compatibilidade: a sessão vive no Firebase Auth, então o
+    // token do backend não é mais armazenado localmente.
     fun saveAuthToken(token: String) { apiClient.authToken = token }
     fun clearAuthToken()             { apiClient.authToken = null  }
 
-    // ── Auth ──────────────────────────────────────────────────────────────────
+    // ── Registro de dispositivo móvel ─────────────────────────────────────────
+
+    /**
+     * Registra (ou atualiza) este aparelho no backend. É o que faz o celular
+     * aparecer como "dispositivo registrado" no painel administrativo.
+     * Deve ser chamado depois de autenticar no Firebase (login, cadastro ou
+     * sessão restaurada). Nunca lança: falha de rede não pode quebrar o login.
+     */
+    suspend fun registerCurrentDevice(vehicleId: Long? = null): Result<ApiClient.MobileDeviceDto> {
+        if (!isConfigured) return Result.failure(IllegalStateException("API não configurada"))
+        return apiClient.registerMobileDevice(deviceName(), vehicleId)
+            .onFailure { Log.w(TAG, "registerMobileDevice falhou: ${it.message}") }
+    }
+
+    /** Nome legível do dispositivo: "Fabricante Modelo" (ex: "Motorola Moto E13"). */
+    fun deviceName(): String {
+        val manufacturer = Build.MANUFACTURER.replaceFirstChar { it.titlecase() }
+        val model = Build.MODEL
+        return if (model.startsWith(manufacturer, ignoreCase = true)) model else "$manufacturer $model"
+    }
+
+    // ── Auth (legado) ─────────────────────────────────────────────────────────
+    // O app autentica pelo Firebase Auth (AuthRepository). Estes métodos usam os
+    // endpoints /v1/auth/* da API, que na migração deixaram de existir (o backend
+    // só valida o ID Token). Ficam aqui apenas para não quebrar código que ainda
+    // os referencie — não são chamados por nenhuma tela.
 
     suspend fun register(name: String, email: String, password: String, phone: String): Result<ApiClient.UserDto> {
-        val result = apiClient.register(name, email, password, phone)
-        result.onSuccess { auth ->
-            apiClient.authToken = auth.token
-            prefs.edit()
-                .putLong(Constants.KEY_BACKEND_USER_ID, auth.user.id)
-                .putString(Constants.KEY_USER_NAME, auth.user.name)
-                .putString(Constants.KEY_USER_EMAIL, auth.user.email)
-                .apply()
-        }
-        return result.map { it.user }
+        return Result.failure(UnsupportedOperationException("Use Firebase Auth (AuthRepository)"))
     }
 
     suspend fun login(email: String, password: String): Result<ApiClient.UserDto> {
-        val result = apiClient.login(email, password)
-        result.onSuccess { auth ->
-            apiClient.authToken = auth.token
-            prefs.edit()
-                .putLong(Constants.KEY_BACKEND_USER_ID, auth.user.id)
-                .putString(Constants.KEY_USER_NAME, auth.user.name)
-                .putString(Constants.KEY_USER_EMAIL, auth.user.email)
-                .apply()
-        }
-        return result.map { it.user }
+        return Result.failure(UnsupportedOperationException("Use Firebase Auth (AuthRepository)"))
     }
 
     suspend fun logout(): Result<Boolean> {

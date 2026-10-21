@@ -44,9 +44,19 @@ class RemoteControlViewModel(application: Application) : AndroidViewModel(applic
 
     private fun loadVehicles() {
         viewModelScope.launch {
-            vehicleRepository.getVehiclesByUser(userId).collect { vehicles ->
-                _state.value = _state.value.copy(vehicles = vehicles, isLoading = false)
-            }
+            vehicleRepository.getVehiclesByUser(userId)
+                .catch { e ->
+                    // Ex.: PERMISSION_DENIED nas regras do Firestore. Degrada
+                    // para lista vazia em vez de derrubar o app.
+                    _state.value = _state.value.copy(
+                        vehicles  = emptyList(),
+                        isLoading = false,
+                        error     = e.message ?: "Erro ao carregar veículos"
+                    )
+                }
+                .collect { vehicles ->
+                    _state.value = _state.value.copy(vehicles = vehicles, isLoading = false)
+                }
         }
     }
 

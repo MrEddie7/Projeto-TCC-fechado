@@ -33,7 +33,11 @@ class FirebaseDataSource {
     // ── Cloud Firestore: Users ──────────────────────────────────────────────
 
     suspend fun syncUser(user: UserModel) {
-        val uid = user.firebaseUid.ifBlank { null } ?: currentAccountUid ?: ""
+        // Chave do documento = UID do Firebase Auth. É a MESMA identidade usada
+        // pelo backend (users/{uid} no requireAuth) e pelas regras de segurança
+        // (request.auth.uid == userId). Usar o id numérico criaria um documento
+        // paralelo e seria negado pelas regras.
+        val uid = user.firebaseUid.ifBlank { null } ?: currentAccountUid ?: return
         val data = mapOf(
             "name"        to user.name,
             "email"       to user.email,
@@ -42,8 +46,8 @@ class FirebaseDataSource {
             "firebaseUid" to uid
         )
         firestore.collection("users")
-            .document(user.id.toString())
-            .set(data)
+            .document(uid)
+            .set(data, com.google.firebase.firestore.SetOptions.merge())
             .await()
     }
 
@@ -82,8 +86,16 @@ class FirebaseDataSource {
     }
 
     fun getVehiclesByUser(userId: Long): Flow<List<VehicleModel>> = callbackFlow {
+        // ownerUid é a chave de identidade compartilhada com a API. O userId
+        // numérico é apenas compatibilidade com os modelos legados do app.
+        val ownerUid = currentAccountUid
+        if (ownerUid == null) {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
         val listener = firestore.collection("vehicles")
-            .whereEqualTo("userId", userId)
+            .whereEqualTo("ownerUid", ownerUid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) { close(error); return@addSnapshotListener }
                 val list = snapshot?.documents?.mapNotNull { doc ->
@@ -95,8 +107,9 @@ class FirebaseDataSource {
     }
 
     suspend fun getVehiclesOnce(userId: Long): List<VehicleModel> {
+        val ownerUid = currentAccountUid ?: return emptyList()
         return firestore.collection("vehicles")
-            .whereEqualTo("userId", userId)
+            .whereEqualTo("ownerUid", ownerUid)
             .get().await()
             .documents.mapNotNull { doc -> doc.data?.let { vehicleFromMap(doc.id, it) } }
     }
@@ -120,7 +133,9 @@ class FirebaseDataSource {
     // ── Cloud Firestore: Routes ─────────────────────────────────────────────
 
     suspend fun syncRoute(route: RouteModel) {
-        val data = mapOf(
+        // ownerUid (UID do Firebase) é a identidade usada pelas regras de
+        // segurança; userId numérico fica como compatibilidade com o modelo.
+        val data = mutableMapOf<String, Any>(
             "id"             to route.id,
             "vehicleId"      to route.vehicleId,
             "userId"         to route.userId,
@@ -133,6 +148,7 @@ class FirebaseDataSource {
             "distance"       to route.distance,
             "status"         to route.status
         )
+        currentAccountUid?.let { data["ownerUid"] = it }
         firestore.collection("routes")
             .document(route.id.toString())
             .set(data)
@@ -144,15 +160,22 @@ class FirebaseDataSource {
     }
 
     fun getRoutesByUser(userId: Long): Flow<List<RouteModel>> = callbackFlow {
+        // Filtra pelo UID do Firebase (ownerUid): é o que as regras autorizam e
+        // o que o backend grava. Sem conta logada, devolve vazio.
+        val ownerUid = currentAccountUid
+        if (ownerUid == null) {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
         val listener = firestore.collection("routes")
-            .whereEqualTo("userId", userId)
-            .orderBy("startTime", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .whereEqualTo("ownerUid", ownerUid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) { close(error); return@addSnapshotListener }
                 val list = snapshot?.documents?.mapNotNull { doc ->
                     doc.data?.let { routeFromMap(doc.id, it) }
                 } ?: emptyList()
-                trySend(list)
+                trySend(list.sortedByDescending { it.startTime })
             }
         awaitClose { listener.remove() }
     }

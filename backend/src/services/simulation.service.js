@@ -1,63 +1,53 @@
-// ─────────────────────────────────────────────────────────────────────────
-// Simulação de veículos pelo próprio backend.
+// Decisão de simulação + rastreador virtual, agora sobre o Firestore.
 //
-// Diferente do hardware-simulator.js (um processo por device, iniciado pelo
-// api.sh), este serviço move os veículos que o USUÁRIO adicionou à simulação
-// pelo app — sem exigir hardware nem processo externo.
+// O painel (e o app) perguntam se um veículo pode entrar na frota simulada.
+// A simulação é representada por um "device" com model='server-sim': quando
+// ele existe, o veículo é movimentado pelo simulador de hardware (api.sh /
+// hardware-simulator.js), que envia telemetria normalmente para a API.
 //
-// Como distinguir as duas origens? O device criado aqui usa
-// `model = 'server-sim'`. O api.sh ignora esses devices (não sobe um
-// hardware-simulator para eles), evitando telemetria duplicada.
-//
-// Movimentação: veículos percorrem rotas viárias reais de São Paulo
-// (road-routes.js), seguindo os waypoints GPS de cada via em loop.
-// ─────────────────────────────────────────────────────────────────────────
+// Antes da migração isso vivia no SQLite (simulation.service.js). Aqui as
+// mesmas regras são aplicadas sobre os documentos do Firestore.
 import { randomBytes } from 'node:crypto';
-import { db } from '../db/database.js';
 import { config } from '../config.js';
 import { HttpError } from '../util/http-error.js';
-import { ingestTelemetry } from './telemetry.service.js';
-import { acknowledgeCommand, getPendingCommandsForDevice } from './command.service.js';
-import {
-  createRouteState,
-  advanceOnRoute,
-  randomRouteIndex,
-  getRoute,
-} from '../util/road-routes.js';
+import { firestore, rtdb, makeId } from './firestore-store.js';
+import { publishToVehicle } from '../realtime/sse.js';
+import { getFirebase } from '../firebase/firebase-admin.js';
 
 export const SERVER_SIM_MODEL = 'server-sim';
 
-// Estado do movimento de cada veículo simulado (mantido em memória).
-// Chave: vehicleId → { routeState, speed, step }
-const moveState = new Map();
+const isServerSim = (device) => Boolean(device) && device.model === SERVER_SIM_MODEL;
 
-function deviceOf(vehicleId) {
-  return db.prepare('SELECT * FROM devices WHERE vehicle_id = ?').get(vehicleId);
+/** Device virtual vinculado ao veículo (ou null). */
+async function simDeviceOf(vehicleId) {
+  const snap = await firestore()
+    .collection('devices')
+    .where('vehicleId', '==', Number(vehicleId))
+    .limit(1)
+    .get();
+  if (snap.empty) return null;
+  return { deviceId: snap.docs[0].id, ...snap.docs[0].data() };
 }
 
-function isServerSimDevice(device) {
-  return Boolean(device) && device.model === SERVER_SIM_MODEL;
-}
-
-// ── Decisão de simulação ────────────────────────────────────────────────
-
-// Responde se o veículo deve (ou pode) entrar na frota simulada. É o que o
-// app consulta após cadastrar um veículo ("pergunta ao backend").
-export function getSimulationDecision(vehicle) {
-  const device = deviceOf(vehicle.id);
-  const simulated = vehicle.simulated === 1;
-  const serverSimulated = isServerSimDevice(device);
-  const hasHardware = Boolean(device) && !serverSimulated;
+/**
+ * Responde se o veículo deve (ou pode) entrar na frota simulada.
+ * @param {object} vehicle documento do Firestore
+ * @param {object|null} [device] device já carregado (evita nova leitura)
+ */
+export function getSimulationDecision(vehicle, device = undefined) {
+  const hasDevice = device !== undefined ? Boolean(device) : Boolean(vehicle.device);
+  const resolved = device !== undefined ? device : vehicle.device;
+  const serverSimulated = isServerSim(resolved);
 
   let recommended = false;
   let reason;
   if (!config.simulationEnabled) {
     reason = 'Simulação desativada no servidor (SIMULATION_ENABLED=false).';
-  } else if (hasHardware) {
+  } else if (hasDevice && !serverSimulated) {
     reason = 'O veículo já possui um rastreador (hardware) vinculado; mantenha como teste real.';
-  } else if (simulated || serverSimulated) {
+  } else if (serverSimulated) {
     recommended = true;
-    reason = 'O veículo já está na frota simulada e continua sendo movimentado pelo backend.';
+    reason = 'O veículo já está na frota simulada e continua sendo movimentado pelo simulador.';
   } else {
     recommended = true;
     reason =
@@ -67,8 +57,8 @@ export function getSimulationDecision(vehicle) {
 
   return {
     vehicleId: Number(vehicle.id),
-    simulated,
-    hasDevice: Boolean(device),
+    simulated: serverSimulated,
+    hasDevice,
     deviceSimulated: serverSimulated,
     simulationAvailable: config.simulationEnabled,
     recommended,
@@ -76,223 +66,173 @@ export function getSimulationDecision(vehicle) {
   };
 }
 
-// ── Aplicar a escolha do app ────────────────────────────────────────────
-
-function startPositionFor(vehicle) {
-  const base = { lat: Number(vehicle.latitude), lng: Number(vehicle.longitude) };
-  if (base.lat && base.lng) return base;
-  return {
-    lat: config.simulatorStartLat + (Math.random() - 0.5) * 0.02,
-    lng: config.simulatorStartLng + (Math.random() - 0.5) * 0.02,
-  };
-}
-
-export function applySimulationDecision(vehicle, simulate) {
-  let device = deviceOf(vehicle.id);
-
-  if (simulate) {
-    if (!config.simulationEnabled) {
-      throw new HttpError(409, 'Simulação desativada no servidor (SIMULATION_ENABLED=false)');
-    }
-    if (device && !isServerSimDevice(device)) {
-      throw new HttpError(409, 'Este veículo já possui um rastreador (hardware) vinculado');
-    }
-
-    const now = Date.now();
-    if (!device) {
-      const deviceId = `vt_${randomBytes(8).toString('hex')}`;
-      const apiKey = randomBytes(24).toString('hex');
-      const pos = startPositionFor(vehicle);
-      const info = db
-        .prepare(
-          `INSERT INTO devices (device_id, api_key, vehicle_id, model, simulated, created_at)
-           VALUES (?, ?, ?, ?, 1, ?)`
-        )
-        .run(deviceId, apiKey, vehicle.id, SERVER_SIM_MODEL, now);
-      device = db.prepare('SELECT * FROM devices WHERE id = ?').get(Number(info.lastInsertRowid));
-      db.prepare(
-        `UPDATE vehicles SET latitude = ?, longitude = ?, updated_at = ? WHERE id = ?`
-      ).run(pos.lat, pos.lng, now, vehicle.id);
-    }
-
-    db.prepare('UPDATE vehicles SET simulated = 1, updated_at = ? WHERE id = ?').run(now, vehicle.id);
-    // Reinicia o estado de movimento a partir da posição atual.
-    moveState.delete(Number(vehicle.id));
-  } else {
-    // Volta a ser "teste real": remove apenas o rastreador virtual criado aqui,
-    // preservando qualquer hardware real eventualmente vinculado. O histórico de
-    // comandos/telemetria do veículo é mantido.
-    if (isServerSimDevice(device)) {
-      db.prepare('DELETE FROM devices WHERE id = ?').run(device.id);
-      device = null;
-    }
-    db.prepare('UPDATE vehicles SET simulated = 0, updated_at = ? WHERE id = ?').run(
-      Date.now(),
-      vehicle.id
-    );
-    moveState.delete(Number(vehicle.id));
+/**
+ * Aplica a escolha { simulate: true|false }.
+ * true  → cria o device virtual (model='server-sim') se não existir;
+ * false → remove APENAS o device virtual, preservando hardware real.
+ * Retorna { vehicle (documento atualizado), device }.
+ */
+export async function applySimulationDecision(vehicle, simulate) {
+  if (!config.simulationEnabled && simulate) {
+    throw new HttpError(409, 'Simulação desativada no servidor (SIMULATION_ENABLED=false)');
   }
 
-  const updated = db.prepare('SELECT * FROM vehicles WHERE id = ?').get(vehicle.id);
+  const db = firestore();
+  const vehicleRef = db.collection('vehicles').doc(String(vehicle.id));
+  let device = await simDeviceOf(vehicle.id);
+
+  if (simulate) {
+    if (device && !isServerSim(device)) {
+      throw new HttpError(409, 'Este veículo já possui um rastreador (hardware) vinculado');
+    }
+    const now = Date.now();
+    if (!device) {
+      const hasPosition = Number(vehicle.latitude) && Number(vehicle.longitude);
+      const startLat = hasPosition
+        ? Number(vehicle.latitude)
+        : config.simulatorStartLat + (Math.random() - 0.5) * 0.02;
+      const startLng = hasPosition
+        ? Number(vehicle.longitude)
+        : config.simulatorStartLng + (Math.random() - 0.5) * 0.02;
+      const deviceId = `vt_${randomBytes(8).toString('hex')}`;
+      device = {
+        deviceId,
+        apiKey: randomBytes(24).toString('hex'),
+        vehicleId: Number(vehicle.id),
+        firmware: '',
+        model: SERVER_SIM_MODEL,
+        lastSeen: 0,
+        createdAt: now,
+      };
+      await db.collection('devices').doc(deviceId).set(device);
+      await vehicleRef.set({ latitude: startLat, longitude: startLng, updatedAt: now }, { merge: true });
+    }
+  } else if (isServerSim(device)) {
+    await db.collection('devices').doc(device.deviceId).delete();
+    await rtdb().ref(`telemetry/${vehicle.id}`).remove().catch(() => {});
+    device = null;
+  }
+
+  await vehicleRef.set({ simulated: Boolean(simulate), updatedAt: Date.now() }, { merge: true });
+  const updated = (await vehicleRef.get()).data();
   return { vehicle: updated, device };
 }
 
-// ── Loop de movimentação ────────────────────────────────────────────────
+// ── Posição manual (painel: arrastar o veículo no mapa) ───────────────────
+//
+// O simulador de hardware se move sozinho pelas rotas de SP e só lê a posição
+// no boot. Para o administrador "teleportar" o veículo pelo painel, gravamos
+// aqui a posição escolhida e um carimbo em `sim_control/{vehicleId}` no RTDB.
+// O simulador consulta esse carimbo a cada ciclo e reancora quando ele muda.
 
-// Distribui veículos pelas rotas usando o id do veículo como semente,
-// assim cada veículo sempre começa na mesma rota após reinício.
-function routeIndexFor(vehicleId) {
-  return Number(vehicleId) % 8; // 8 rotas disponíveis
+/** Alvo de posição atual do veículo (ou null se nunca foi definido). */
+export async function getSimControl(vehicleId) {
+  const snap = await rtdb().ref(`sim_control/${Number(vehicleId)}`).get();
+  return snap.exists() ? snap.val() : null;
 }
 
-function stateFor(vehicle) {
-  const id = Number(vehicle.id);
-  let s = moveState.get(id);
-  if (!s) {
-    const lat = Number(vehicle.latitude) || config.simulatorStartLat;
-    const lng = Number(vehicle.longitude) || config.simulatorStartLng;
-    const routeIndex = routeIndexFor(id);
-    const route = getRoute(routeIndex);
-    const nominalSpeed = route.speedKmh;
-    s = {
-      routeState: createRouteState(lat, lng, routeIndex),
-      // Velocidade inicial: 60–100% da nominal para espalhar os veículos na rota.
-      speed: nominalSpeed * (0.6 + (id % 5) * 0.08),
-      step: 0,
-      // lat/lng e heading são calculados a cada tick pelo advanceOnRoute.
-      lat,
-      lng,
-      heading: 0,
-    };
-    moveState.set(id, s);
+/**
+ * Define manualmente a posição do veículo (latitude/longitude e, opcional,
+ * velocidade). Atualiza o documento do veículo, o último ponto de telemetria
+ * (Firestore + RTDB), notifica quem acompanha ao vivo (SSE) e registra o alvo
+ * para o simulador reancorar.
+ * @returns {{ vehicle: object, point: object }}
+ */
+export async function setVehiclePosition(vehicleId, { latitude, longitude, speed = 0 }) {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    throw new HttpError(400, 'Coordenadas inválidas');
   }
-  return s;
+  const vId = Number(vehicleId);
+  const now = Date.now();
+  const spd = Math.max(0, Number(speed) || 0);
+
+  const db = firestore();
+  const vehicleRef = db.collection('vehicles').doc(String(vId));
+  const snap = await vehicleRef.get();
+  if (!snap.exists) throw new HttpError(404, 'Veículo não encontrado');
+
+  const point = {
+    id: makeId(),
+    vehicleId: vId,
+    latitude: lat,
+    longitude: lng,
+    speed: spd,
+    heading: Number(snap.data().heading || 0),
+    battery: snap.data().battery ?? null,
+    timestamp: now,
+    source: 'manual',
+  };
+
+  await db.collection('telemetry').doc(String(point.id)).set(point);
+  await vehicleRef.set(
+    { latitude: lat, longitude: lng, speed: spd, lastUpdate: now, updatedAt: now },
+    { merge: true }
+  );
+  await rtdb().ref(`telemetry/${vId}`).set(point);
+  // Carimbo que o simulador observa para reancorar nesta posição.
+  await rtdb().ref(`sim_control/${vId}`).set({ latitude: lat, longitude: lng, updatedAt: now });
+  publishToVehicle(vId, 'telemetry', point);
+
+  const updated = (await vehicleRef.get()).data();
+  return { vehicle: updated, point };
 }
 
-// Avança o veículo ao longo da via real, simulando aceleração/desaceleração
-// e paradas semafóricas sem sair da estrada.
-function advance(s, dtSec) {
-  s.step++;
-  const route = getRoute(s.routeState.routeIndex);
-  const nominalSpeed = route.speedKmh;
+// ── Sincronização Firebase ───────────────────────────────────────────────
+// Batch sync: Firebase Auth users -> Firestore users collection
+// Útil para popular o Firestore com usuários criados direto no Console.
+export async function syncFirebaseUsers() {
+  const fb = getFirebase();
+  const auth = fb.auth;
+  const db = firestore();
 
-  // Ciclo de 60 ticks: ~4 ticks parado (semáforo), aceleração gradual, cruzeiro
-  // com pequenas variações de velocidade (tráfego), frenagem antes do próximo ciclo.
-  const cycle = s.step % 60;
-  if (cycle < 4) {
-    s.speed = 0; // semáforo vermelho
-  } else if (s.speed < nominalSpeed) {
-    // Aceleração: +5 km/h por tick até a velocidade nominal da via
-    s.speed = Math.min(s.speed + 5, nominalSpeed);
-  } else if (cycle > 52) {
-    // Desaceleração suave antes da parada
-    s.speed = Math.max(s.speed - 4, 0);
-  } else {
-    // Cruzeiro: variação ±3 km/h para simular tráfego (carro da frente etc.)
-    const jitter = (Math.sin(s.step * 0.37) * 3);
-    s.speed = Math.max(5, Math.min(nominalSpeed + jitter, nominalSpeed * 1.15));
-  }
+  let synced = 0;
+  let errors = 0;
+  const batchSize = 1000;
+  let nextPageToken;
 
-  if (s.speed < 0.5) return; // parado: não avança, mas mantém posição na via
-
-  const distM = (s.speed / 3.6) * dtSec;
-  const pos = advanceOnRoute(s.routeState, distM, s.speed);
-  s.lat = pos.lat;
-  s.lng = pos.lng;
-  s.heading = pos.heading;
-}
-
-// Sincroniza o controle remoto com o rastreador virtual: pega os comandos
-// pendentes (block/unblock) da fila do backend, "executa" e confirma (ACK).
-// O ACK atualiza vehicles.is_blocked e notifica o app via SSE.
-function processPendingCommands(device) {
-  const pending = getPendingCommandsForDevice(device);
-  for (const cmd of pending) {
-    try {
-      acknowledgeCommand(device, cmd.id, {
-        ok: true,
-        note: 'executado pelo rastreador virtual (backend)',
-      });
-      console.log(`[sim-bot] veículo ${device.vehicle_id}: comando "${cmd.command}" confirmado`);
-    } catch (e) {
-      console.warn(`[sim-bot] veículo ${device.vehicle_id}: falha no comando ${cmd.id}:`, e.message);
-    }
-  }
-  return pending.length;
-}
-
-export function simulationTick() {
-  if (!config.simulationEnabled) return 0;
-  const vehicles = db
-    .prepare(
-      `SELECT v.* FROM vehicles v
-       JOIN devices d ON d.vehicle_id = v.id
-       WHERE v.simulated = 1 AND d.simulated = 1 AND d.model = ?
-       ORDER BY v.id`
-    )
-    .all(SERVER_SIM_MODEL);
-
-  const dt = config.simulationIntervalMs / 1000;
-  let moved = 0;
-  for (const v of vehicles) {
-    try {
-      const device = deviceOf(v.id);
-      if (!device) continue;
-
-      // Primeiro aplica o controle remoto (block/unblock), se houver.
-      processPendingCommands(device);
-
-      // Relê o veículo: um comando pode ter alterado is_blocked.
-      const vehicle = db.prepare('SELECT * FROM vehicles WHERE id = ?').get(v.id);
-      const s = stateFor(vehicle);
-
-      if (vehicle.is_blocked === 1) {
-        // Bloqueado: permanece parado, mas segue "online" reportando a posição,
-        // exatamente como um rastreador com a ignição cortada.
-        s.speed = 0;
-        ingestTelemetry({
-          device,
-          latitude: Number(s.lat.toFixed(6)),
-          longitude: Number(s.lng.toFixed(6)),
-          speed: 0,
-          heading: Number(s.heading.toFixed(1)),
-          battery: 12.6,
-          timestamp: Date.now(),
-        });
-        continue;
+  do {
+    const list = await auth.listUsers(batchSize, nextPageToken);
+    for (const u of list.users) {
+      try {
+        await db.collection('users').doc(u.uid).set({
+          firebaseUid: u.uid,
+          email: u.email || '',
+          name: u.displayName || u.email?.split('@')[0] || 'Usuário',
+          phone: u.phoneNumber || '',
+          updatedAt: Date.now(),
+        }, { merge: true });
+        synced++;
+      } catch (e) {
+        console.error(`[sync] erro ao sincronizar user ${u.uid}:`, e.message);
+        errors++;
       }
-
-      advance(s, dt);
-      ingestTelemetry({
-        device,
-        latitude: Number(s.lat.toFixed(6)),
-        longitude: Number(s.lng.toFixed(6)),
-        speed: Number(s.speed.toFixed(1)),
-        heading: Number(s.heading.toFixed(1)),
-        battery: parseFloat((12.0 + Math.random() * 0.8).toFixed(1)),
-        timestamp: Date.now(),
-      });
-      moved++;
-    } catch (e) {
-      console.warn(`[sim-bot] veículo ${v.id} falhou:`, e.message);
     }
-  }
-  return moved;
+    nextPageToken = list.pageToken;
+  } while (nextPageToken);
+
+  return { synced, errors, timestamp: Date.now() };
 }
 
-// Inicia o loop (chamado no boot do servidor). Retorna o timer ou null.
-export function startVehicleSimulation() {
-  if (!config.simulationEnabled) {
-    console.log('[sim-bot] desativado (SIMULATION_ENABLED=false)');
-    return null;
+// Sync: Firestore mobile_devices -> RTDB mobile_devices (tempo real)
+// Permite que o painel veja os dispositivos móveis registrados em tempo real.
+export async function syncMobileDevicesToRtdb() {
+  const snap = await firestore().collection('mobile_devices').get();
+  const updates = {};
+
+  for (const doc of snap.docs) {
+    const data = doc.data();
+    updates[doc.id] = {
+      id: data.id,
+      userId: data.userId,
+      vehicleId: data.vehicleId ?? null,
+      deviceName: data.deviceName,
+      createdAt: Number(data.createdAt),
+      updatedAt: Number(data.updatedAt),
+    };
   }
-  const timer = setInterval(() => {
-    try {
-      simulationTick();
-    } catch (e) {
-      console.warn('[sim-bot] erro no tick:', e.message);
-    }
-  }, config.simulationIntervalMs);
-  console.log(`[sim-bot] movendo veículos simulados a cada ${config.simulationIntervalMs}ms`);
-  return timer;
+
+  await rtdb().ref('mobile_devices').set(updates || {});
+  return { count: snap.size, timestamp: Date.now() };
 }

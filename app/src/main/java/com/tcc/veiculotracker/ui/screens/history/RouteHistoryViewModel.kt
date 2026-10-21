@@ -15,7 +15,8 @@ data class HistoryState(
     val routes: List<RouteModel> = emptyList(),
     val selectedRoute: RouteModel? = null,
     val routePoints: List<RoutePointModel> = emptyList(),
-    val isLoading: Boolean = true
+    val isLoading: Boolean = true,
+    val error: String? = null
 )
 
 class RouteHistoryViewModel(application: Application) : AndroidViewModel(application) {
@@ -34,9 +35,18 @@ class RouteHistoryViewModel(application: Application) : AndroidViewModel(applica
 
     private fun loadRoutes() {
         viewModelScope.launch {
-            routeRepository.getRoutesByUser(userId).collect { routes ->
-                _state.value = _state.value.copy(routes = routes, isLoading = false)
-            }
+            routeRepository.getRoutesByUser(userId)
+                .catch { e ->
+                    // Ex.: PERMISSION_DENIED nas regras do Firestore.
+                    _state.value = _state.value.copy(
+                        routes    = emptyList(),
+                        isLoading = false,
+                        error     = e.message ?: "Erro ao carregar rotas"
+                    )
+                }
+                .collect { routes ->
+                    _state.value = _state.value.copy(routes = routes, isLoading = false)
+                }
         }
     }
 

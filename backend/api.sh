@@ -57,6 +57,14 @@ argv0() {
 }
 
 PORT="${PORT:-$(env_value PORT 3000)}"
+# PORT inválido vindo do ambiente (ex.: PORT=0) faria o health check bater na
+# porta errada. Mantém apenas portas TCP válidas (1..65535).
+if ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+  PORT="$(env_value PORT 3000)"
+fi
+if ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+  PORT=3000
+fi
 API_URL="http://localhost:${PORT}"
 
 # Espera o /health responder antes de devolver o controle.
@@ -138,24 +146,14 @@ start() {
     return 0
   fi
 
-  # Lista a frota: um device por veículo vinculado. SIM_FLEET limita a
-  # quantidade, o que ajuda quando o banco tem muitos veículos de teste.
+  # Lista a frota (Firestore): um device por veículo vinculado — exclui os
+  # rastreadores virtuais de simulação. SIM_FLEET limita a quantidade, o que
+  # ajuda quando o projeto tem muitos veículos de teste.
   local limit="${SIM_FLEET:-0}" rows
-  rows="$(cd "$DIR" && node -e "
-    const { DatabaseSync } = require('node:sqlite');
-    const db = new DatabaseSync('./data/securitas.db', { readOnly: true });
-    const limit = ${limit:-0};
-    const sql = \`SELECT d.device_id, d.api_key, v.plate
-                 FROM devices d JOIN vehicles v ON v.id = d.vehicle_id
-                 WHERE d.vehicle_id IS NOT NULL AND d.model <> 'server-sim'
-                 ORDER BY d.id\` + (limit > 0 ? ' LIMIT ' + limit : '');
-    for (const r of db.prepare(sql).all()) {
-      console.log([r.device_id, r.api_key, r.plate].join('\t'));
-    }
-  " 2>/dev/null || true)"
+  rows="$(cd "$DIR" && node src/list-devices.js "$limit" 2>/dev/null || true)"
 
   if [ -z "$rows" ]; then
-    echo "[sim] ignorado: nenhum veículo com device. Rode 'npm run seed' antes." >&2
+    echo "[sim] ignorado: nenhum rastreador no Firestore. Crie um device com POST /v1/vehicles/:id/device." >&2
     return 0
   fi
 

@@ -28,7 +28,7 @@ const API_URL =
 const INTERVAL_MS = Number(process.env.VTSIM_INTERVAL_MS || config.simulatorIntervalMs);
 
 if (!DEVICE_ID || !API_KEY) {
-  console.error('Informe VTSIM_DEVICE_ID e VTSIM_API_KEY (gerados em POST /v1/vehicles/:id/device ou via npm run seed).');
+  console.error('Informe VTSIM_DEVICE_ID e VTSIM_API_KEY (gerados em POST /v1/vehicles/:id/device).');
   process.exit(1);
 }
 
@@ -43,6 +43,10 @@ let step = 0;
 // Estado do relê de corte de ignição. Quando bloqueado, o veículo para de
 // andar (mas continua reportando telemetria, como um rastreador real).
 let blocked = false;
+
+// Alvo de posição definido no painel (arrastar o veículo no mapa). Guardamos o
+// carimbo (updatedAt) já aplicado para só reancorar quando ELE mudar.
+let appliedControlAt = 0;
 
 // Rota viária que este simulador vai percorrer. Determinada no boot a partir
 // dos últimos caracteres do DEVICE_ID para distribuir dispositivos pelas vias.
@@ -117,7 +121,31 @@ async function pollCommands() {
   return (json.commands || []).length;
 }
 
+// Consulta o alvo de posição definido no painel (arrastar o veículo no mapa).
+// Reancora apenas quando o carimbo muda, para não brigar com o trajeto normal.
+async function pollPositionControl() {
+  const res = await fetch(`${API_URL}/v1/hardware/${DEVICE_ID}/position`, {
+    headers: { 'x-device-id': DEVICE_ID, 'x-api-key': API_KEY },
+  });
+  if (res.status !== 200) return; // 204 = sem alvo definido
+  const target = await res.json().catch(() => null);
+  if (!target || !Number.isFinite(Number(target.updatedAt))) return;
+  if (Number(target.updatedAt) <= appliedControlAt) return;
+  appliedControlAt = Number(target.updatedAt);
+  lat = Number(target.latitude);
+  lng = Number(target.longitude);
+  // Reposiciona o trajeto na via mais próxima do ponto escolhido, mantendo a
+  // rota atual do simulador.
+  routeState = createRouteState(lat, lng, routeIndex);
+  console.log(
+    `[sim] posição definida pelo painel -> ${lat.toFixed(6)}, ${lng.toFixed(6)}`
+  );
+}
+
 async function sendTelemetry() {
+  // Antes de andar, verifica se o painel definiu uma nova posição (arrastar no
+  // mapa). Se sim, reancora ali e segue percorrendo a via a partir dali.
+  await pollPositionControl();
   if (blocked) {
     // Ignorado o avanço: o veículo permanece na posição, com velocidade 0.
     speed = 0;

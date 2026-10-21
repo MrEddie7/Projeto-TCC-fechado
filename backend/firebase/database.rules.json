@@ -1,0 +1,22 @@
+{
+  "rules": {
+    "telemetry": {
+      "$vehicleId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "commands": {
+      "$vehicleId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "mobile_locations": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid",
+        ".write": "auth != null && auth.uid == $uid"
+      }
+    }
+  }
+}

@@ -7,6 +7,7 @@ import com.google.firebase.auth.FirebaseAuthInvalidUserException
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.tcc.veiculotracker.data.model.UserModel
+import com.tcc.veiculotracker.data.remote.ApiClient
 import com.tcc.veiculotracker.data.sync.SyncManager
 import com.tcc.veiculotracker.util.Constants
 import kotlinx.coroutines.tasks.await
@@ -122,8 +123,19 @@ class AuthRepository(
         saveUserPrefs(user)
         // Grava no Firestore e envia os veículos da conta.
         syncManager.syncAccountToCloud(user)
+        // Registra este aparelho na API: é o que faz o celular aparecer como
+        // "dispositivo registrado" no painel administrativo.
+        ensureDeviceRegistered()
         return user
     }
+
+    /**
+     * Registra/atualiza este aparelho na API, usando o ID Token do Firebase
+     * (a API valida o token no header Authorization). Nunca lança: sem rede ou
+     * sem API configurada, o login continua funcionando normalmente.
+     */
+    suspend fun ensureDeviceRegistered(): Result<ApiClient.MobileDeviceDto>? =
+        runCatching { syncManager.backendRepository?.registerCurrentDevice() }.getOrNull()
 
     private fun saveUserPrefs(user: UserModel) {
         prefs.edit().apply {

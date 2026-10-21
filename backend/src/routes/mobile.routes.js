@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db } from '../db/database.js';
+import { getFirebase } from '../firebase/firebase-admin.js';
 import { requireAuth } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/error.js';
 import { HttpError } from '../util/http-error.js';
@@ -11,8 +11,8 @@ router.use(requireAuth);
 
 function serializeLocation(row) {
   return {
-    id: Number(row.id),
-    userId: Number(row.user_id),
+    id: row.id,
+    userId: row.userId,
     latitude: row.latitude,
     longitude: row.longitude,
     speed: row.speed,
@@ -43,25 +43,18 @@ router.post(
       throw new HttpError(400, 'Coordenadas inválidas');
     }
     const now = Date.now();
-    const info = db
-      .prepare(
-        `INSERT INTO mobile_locations (user_id, latitude, longitude, speed, heading, accuracy, timestamp, source, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        req.user.id,
-        latitude,
-        longitude,
-        speed || 0,
-        heading || 0,
-        accuracy || 0,
-        timestamp || now,
-        source || 'mobile_app',
-        now
-      );
-    const location = db
-      .prepare('SELECT * FROM mobile_locations WHERE id = ?')
-      .get(Number(info.lastInsertRowid));
+    const location = {
+      id: req.user.uid,
+      userId: req.user.uid,
+      latitude, longitude,
+      speed: Number(speed) || 0,
+      heading: Number(heading) || 0,
+      accuracy: Number(accuracy) || 0,
+      timestamp: Number(timestamp) || now,
+      source: source || 'mobile_app',
+    };
+    // Estado atual, não histórico: RTDB é a fonte para a última localização.
+    await getFirebase().rtdb.ref(`mobile_locations/${req.user.uid}`).set(location);
     res.status(201).json({ ok: true, location: serializeLocation(location) });
   })
 );
@@ -71,10 +64,8 @@ router.post(
 router.get(
   '/location/latest',
   asyncHandler(async (req, res) => {
-    const location = db
-      .prepare('SELECT * FROM mobile_locations WHERE user_id = ? ORDER BY timestamp DESC LIMIT 1')
-      .get(req.user.id);
-    res.json({ location: location ? serializeLocation(location) : null });
+    const snapshot = await getFirebase().rtdb.ref(`mobile_locations/${req.user.uid}`).get();
+    res.json({ location: snapshot.exists() ? serializeLocation(snapshot.val()) : null });
   })
 );
 

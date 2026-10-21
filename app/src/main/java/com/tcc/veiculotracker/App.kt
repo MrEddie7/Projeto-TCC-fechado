@@ -1,6 +1,7 @@
 package com.tcc.veiculotracker
 
 import android.app.Application
+import com.google.firebase.auth.FirebaseAuth
 import com.tcc.veiculotracker.data.remote.FirebaseDataSource
 import com.tcc.veiculotracker.data.remote.LocationService
 import com.tcc.veiculotracker.data.repository.ApiConfigRepository
@@ -9,9 +10,16 @@ import com.tcc.veiculotracker.data.repository.BackendRepository
 import com.tcc.veiculotracker.data.repository.RouteRepository
 import com.tcc.veiculotracker.data.repository.VehicleRepository
 import com.tcc.veiculotracker.data.sync.SyncManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
 
 class App : Application() {
+
+    // Escopo de vida longa (não é cancelado enquanto o app existir).
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     val firebaseDataSource: FirebaseDataSource by lazy { FirebaseDataSource() }
 
@@ -35,5 +43,12 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         Configuration.getInstance().userAgentValue = packageName
+
+        // Sessão restaurada (Firebase Auth): o usuário já está logado, mas o
+        // backend ainda não conhece este aparelho. Registra uma vez no boot,
+        // sem bloquear a inicialização da UI.
+        if (FirebaseAuth.getInstance().currentUser != null) {
+            appScope.launch { authRepository.ensureDeviceRegistered() }
+        }
     }
 }

@@ -2,22 +2,23 @@
  SECURITAS - BACKEND API - ESTRUTURA COMPLETA
 ================================================================================
  API de ponte entre o hardware rastreador (GPS IoT) e o app Android
- Última atualização: [2026-09-23]
+ Última atualização: [2026-10-20]
 ================================================================================
 
 ÍNDICE
   1. Visão geral e arquitetura
   2. Diagrama de fluxo de dados
   3. Como rodar
-  4. Banco de dados (tabelas)
+  4. Banco de dados (Firebase)
   5. Autenticação (app e hardware)
   6. Endpoints do app (método, path, auth, body, resposta)
   7. Endpoints do hardware (protocolo do firmware)
   8. Tempo real via SSE
-  9. Sincronização SQLite -> Firebase (Firestore + Realtime DB)
+  9. Painel web do administrador (/v1/admin)
  10. Ligação com o app Android (ApiLinkScreen + FirebaseDataSource)
  11. Variáveis de ambiente (.env)
  12. Comandos úteis
+ 13. Simulação de frota e teste real x simulador
 
 
 ================================================================================
@@ -28,39 +29,44 @@
    [APP ANDROID]                 [BACKEND API]                 [HARDWARE GPS]
    (Kotlin/Compose)              (Node.js + Express)           (ESP32/módulo)
         |                             |                             |
-        |-- auth/veículos/rotas ----->|-> SQLite (fonte da verdade) |
+        |-- auth/veículos/rotas ----->|-> Firestore (fonte da verdade)
         |-- comandos block/unblock -->|-> fila de comandos     <---|-- polling
         |<-- telemetria/status --------|<--------------------------|-- telemetria HTTP
         |<-- SSE em tempo real --------|                            |
 
- - Tecnologias: Node.js >= 22.5, Express 4, SQLite via node:sqlite (sem ORM),
-   firebase-admin (opcional), SSE para tempo real.
+ - Tecnologias: Node.js >= 22.5, Express 4, firebase-admin (Firestore +
+   Realtime Database), SSE para tempo real.
+ - NÃO há banco local. O Firestore é o banco único da API; o Realtime Database
+   guarda apenas telemetria ao vivo e a última localização de cada celular.
  - Arquitetura: REST simples. Nenhum framework opinativo; camada de middleware
    para auth, serviços para regras de negócio e rotas para HTTP.
 
  Estrutura de arquivos (backend/src):
    server.js                     - ponto de entrada (liga o processo)
-   app.js                        - monta o express (CORS, rotas, admin)
+   app.js                        - monta o express (CORS, rotas, logs, painel)
    config.js                     - lê .env e expõe config central
-   db/database.js                - abre o SQLite e cria/migra o schema
-   middleware/auth.js            - requireAuth (Bearer) + requireDevice (headers)
+   middleware/auth.js            - requireAuth (ID Token) + requireDevice (headers)
    middleware/error.js           - handlers 404/500 + asyncHandler
-   routes/auth.routes.js         - registro/login/perfil/logout
-   routes/vehicles.routes.js     - CRUD de veículos + geração de device
+   routes/vehicles.routes.js     - CRUD de veículos + device + simulação (app)
+   routes/devices.routes.js      - registro do celular do app (mobile_devices)
    routes/telemetry.routes.js    - latest / history / stream (SSE)
    routes/commands.routes.js     - enviar e listar comandos
    routes/routes.routes.js       - start/stop rotas + pontos geográficos
    routes/hardware.routes.js     - endpoints consumidos pelo firmware
    routes/mobile.routes.js       - localização do celular do app (Bearer)
+   routes/admin.routes.js        - visão do administrador (painel web)
    services/telemetry.service.js - ingere pontos, atualiza veículo/rota
    services/command.service.js   - fila block/unblock + ACK
-   services/auth.service.js      - scrypt, tokens Bearer
-   services/firebase-sync.service.js - espelha SQLite -> Firebase
+   services/simulation.service.js- decide/aplica a simulação (device server-sim)
+   services/admin.service.js     - lê Firestore/RTDB e monta os dados do painel
+   services/firestore-store.js   - acesso ao Firestore da API
+   services/log-buffer.service.js- buffer em memória das requisições (logs)
    realtime/sse.js               - hub Server-Sent Events por veículo
    firebase/firebase-admin.js    - inicializa Admin SDK (sob demanda)
-   seed.js                       - dados demo (usuário+veículo+device)
+   list-devices.js               - lista rastreadores (Firestore) p/ o api.sh
    hardware-simulator.js         - simula um rastreador em movimento
    util/geo.js                   - haversine (distância entre coordenadas)
+   util/road-routes.js           - vias do simulador (rotas viárias)
    util/http-error.js            - classe HttpError (status + mensagem)
 
 
@@ -70,23 +76,23 @@
  (A) TELEMETRIA (hardware -> app)
    Hardware POST /v1/hardware/telemetry
         |-> ingestTelemetry()
-        |    1. grava ponto em `telemetry`
+        |    1. grava ponto em `telemetry` (Firestore)
         |    2. atualiza lat/lng/speed/last_update em `vehicles`
         |    3. se houver rota `em_andamento`, grava em route_points e soma
         |       distância (haversine)
         |    4. publica evento SSE `telemetry` para assinantes do veículo
-        |    5. (opcional) Sync espelha em RTDB telemetry/{vehicleId}
+        |    5. espelha a última posição em RTDB telemetry/{vehicleId}
 
  (B) COMANDO (app -> hardware -> app)
    App POST /v1/vehicles/:id/commands {command:"block"}
-        |-> cria linha `pending` em commands
+        |-> cria documento `pending` em commands
         |-> SSE `command` (aviso instantâneo no app)
    Hardware GET /v1/hardware/:deviceId/commands?status=pending   (polling)
         |-> recebe o comando, executa no relê
    Hardware POST /v1/hardware/:deviceId/commands/:id/ack {ok:true}
-        |-> marca `acknowledged`, seta vehicles.is_blocked
+        |-> marca `acknowledged`, seta vehicles.isBlocked
         |-> SSE `blocked` -> app atualiza status na tela
-        |-> (opcional) Sync espelha commands/{vehicleId} no RTDB
+        |-> espelha commands/{vehicleId} no RTDB
 
  (C) ROTA (app)
    App POST /v1/vehicles/:id/routes/start  -> cria rota `em_andamento`
@@ -100,74 +106,82 @@
 ================================================================================
    cd backend
    npm install
-   cp .env.example .env            # opcional, só se for usar Firebase
+   cp .env.example .env            # e preencha FIREBASE_* (obrigatório)
    node src/server.js              # API em http://localhost:3000
 
-   npm run seed                    # cria usuário+veículo+device demo
    npm run simulator               # requer VTSIM_DEVICE_ID e VTSIM_API_KEY
-   node tests/e2e.js               # suíte ponta a ponta (27 testes)
+   npm run api                     # sobe a API + um simulador por device
+
+   O Firebase é obrigatório: coloque a chave da conta de serviço em
+   backend/firebase-service-account.json antes de subir a API.
 
 
 ================================================================================
- 4. BANCO DE DADOS (SQLite - src/db/database.js)
+ 4. BANCO DE DADOS (Firebase)
 ================================================================================
- PRAGMA journal_mode=WAL, foreign_keys=ON.
+ Não há SQLite. Dois armazenamentos:
 
- users
-   id, name, email(UNIQUE), phone, password_hash, created_at, updated_at
+ ── Cloud Firestore (instância FIRESTORE_ID, padrão "securitas") ──────────
+   users/{uid}
+     name, email, phone, firebaseUid, createdAt, updatedAt
+     (uid = UID do Firebase Auth; criado/atualizado pela API no requireAuth)
 
- tokens
-   id, user_id(FK), token(UNIQUE), created_at, expires_at
-   (sessão: 30 dias; token = hex 64 chars)
+   vehicles/{id}
+     id (Number), userId, ownerUid, plate, model, brand, year, color,
+     isBlocked, latitude, longitude, speed, lastUpdate, createdAt, updatedAt
 
- vehicles
-   id, user_id(FK), plate, model, brand, year, color,
-   is_blocked (0/1), latitude, longitude, speed, last_update,
-   created_at, updated_at
+   devices/{deviceId}
+     deviceId, apiKey, vehicleId, firmware, model, lastSeen, createdAt
+     (deviceId = "vt_" + 16 hex; apiKey = 24 bytes hex)
+     model = 'server-sim' marca o rastreador VIRTUAL de simulação.
 
- devices
-   id, device_id(UNIQUE), api_key(UNIQUE), vehicle_id(FK),
-   firmware, model, last_seen, created_at
-   (device_id = "vt_" + 16 hex; api_key = 24 bytes hex)
+   telemetry/{auto}
+     id, vehicleId, deviceId, latitude, longitude, speed, heading, battery,
+     timestamp
 
- telemetry
-   id, vehicle_id(FK), device_id, latitude, longitude, speed,
-   heading, battery, timestamp
-   (limitado por MAX_TELEMETRY_POINTS por veículo)
+   routes/{id}
+     id, vehicleId, userId, startLatitude/longitude, endLatitude/longitude,
+     startTime, endTime, distance, maxSpeed, status
+     ('em_andamento'|'concluida'), updatedAt
 
- routes
-   id, vehicle_id(FK), user_id(FK), start_latitude/longitude,
-   end_latitude/longitude, start_time, end_time, distance,
-   max_speed, status ('em_andamento'|'concluida'), updated_at
+   route_points/{auto}
+     id, routeId, latitude, longitude, speed, heading, timestamp
 
- route_points
-   id, route_id(FK), latitude, longitude, speed, heading, timestamp
+   commands/{id}
+     id, vehicleId, command ('block'|'unblock'), status
+     ('pending'|'acknowledged'|'failed'), note, createdAt, acknowledgedAt
 
- commands
-   id, vehicle_id(FK), command('block'|'unblock'), status
-   ('pending'|'acknowledged'|'failed'), note, created_at, acknowledged_at
+   mobile_devices/{uid}
+     id, userId, vehicleId, deviceName, createdAt, updatedAt
+     (cadastro do CELULAR do app; 1 documento por conta)
 
- sync_state
-   key(PK), value   -> watermark da última sincronização por entidade
+ ── Realtime Database (FIREBASE_DATABASE_URL) ─────────────────────────────
+   telemetry/{vehicleId}    { latitude, longitude, speed, heading, timestamp }
+     -> última posição; o app escuta em FirebaseDataSource.listenTelemetry
 
- Índices: telemetry(vehicle_id,timestamp), route_points(route_id,timestamp),
-          commands(vehicle_id,status).
+   commands/{vehicleId}     { command, timestamp, status }
+     -> resposta do comando; o app escuta em listenCommandResponse
+
+   mobile_locations/{uid}   { latitude, longitude, speed, heading, accuracy,
+                              timestamp, source }
+     -> última posição do celular (POST /v1/mobile/location)
 
 
 ================================================================================
  5. AUTENTICAÇÃO
 ================================================================================
- APP (usuário)  -> Authorization: Bearer <token>
-   - Token gerado em /v1/auth/register ou /v1/auth/login.
-   - Válido 30 dias; inválido via POST /v1/auth/logout.
-   - Validação: middleware requireAuth (src/middleware/auth.js).
-   - Senha: scrypt (salt:hash de 64 bytes) em auth.service.js.
+ APP (usuário)  -> Authorization: Bearer <Firebase ID Token>
+   - O LOGIN/REGISTRO é feito pelo Firebase Auth no próprio app Android.
+   - A API apenas VALIDA o token (firebase-admin verifyIdToken) no middleware
+     requireAuth (src/middleware/auth.js). Não há login nem senha na API.
+   - A cada requisição, a API faz upsert de users/{uid} com email/nome/telefone.
+   - Middleware: 401 sem token ou token inválido/expirado.
 
  HARDWARE (dispositivo) -> headers x-device-id + x-api-key
-   - Credenciais geradas em POST /v1/vehicles/:id/device (ou npm run seed).
+   - Credenciais geradas em POST /v1/vehicles/:id/device.
    - Devem ser gravadas no firmware (flash).
-   - Validação: middleware requireDevice (mesmo arquivo). 401 sem headers,
-     403 se não casam com devices.
+   - Validação: middleware requireDevice (mesmo arquivo), lê devices/{deviceId}
+     no Firestore. 401 sem headers, 403 se não casam com devices.
 
  Códigos de erro do JSON: { "error": "mensagem" }
    400 param inválido | 401 sem auth | 403 sem permissão |
@@ -177,36 +191,30 @@
 ================================================================================
  6. ENDPOINTS DO APP
 ================================================================================
- Legenda: 🔒 = exige Authorization: Bearer <token-app>
+ Legenda: 🔒 = exige Authorization: Bearer <Firebase ID Token>
 
  ── Auth ────────────────────────────────────────────────────────────────────
- POST /v1/auth/register
-   body: { name, email, password, phone? }
-   resp 201: { user:{id,name,email,phone,createdAt}, token, expiresAt }
-   409 se e-mail já cadastrado; 400 sem name/email/password, email inválido
-   ou senha < 6 chars.
+ (Registro, login e logout acontecem no Firebase Auth: SDK no app Android e
+  REST do Identity Toolkit no painel web. A API só valida o ID Token.)
 
- POST /v1/auth/login
-   body: { email, password }
-   resp 200: { user, token, expiresAt }
-   resp 401: credenciais inválidas.
+ GET /v1/auth/config
+   resp 200: { firebaseApiKey }  (chave pública p/ o login do painel web)
 
  GET /v1/auth/me  🔒
-   resp 200: { user }
-
- POST /v1/auth/logout  🔒
-   resp 200: { ok:true }  (token revogado)
+   resp 200: { user:{ uid, email, name, phone } }
 
  ── Veículos ────────────────────────────────────────────────────────────────
  GET /v1/vehicles  🔒
-   resp 200: { vehicles:[ {id,userId,plate,model,brand,year,color,isBlocked,
-                          latitude,longitude,speed,lastUpdate,createdAt} ] }
+   resp 200: { vehicles:[ {id,userId,ownerUid,plate,model,brand,year,color,
+                           isBlocked,latitude,longitude,speed,lastUpdate,
+                           createdAt} ] }
+   Filtra por ownerUid = uid do token (só os veículos do próprio dono).
 
  POST /v1/vehicles  🔒
    body: { plate, model, brand, year, color? }
    resp 201: { vehicle }
    Placa válida: ABC1D23 (Mercosul) ou ABC-1234 (tradicional).
-   Ano: inteiro entre 1950 e ano atual+1. 409 se placa repetida.
+   409 se placa repetida para o mesmo dono.
 
  GET /v1/vehicles/:id  🔒
    resp 200: { vehicle, device }
@@ -224,10 +232,19 @@
                         createdAt} }
    resp 409: já existe device -> { error, device } (idempotente)
 
+ GET /v1/vehicles/:id/simulation  🔒
+   resp 200: { simulation:{ simulated, reason, ... } }
+   Diz se o veículo está na simulação (rastreador virtual server-sim).
+
+ POST /v1/vehicles/:id/simulation  🔒
+   body: { simulate: true|false }
+   resp 200: { simulation, vehicle, device }
+   Veículo com rastreador real não pode ser simulado.
+
  ── Telemetria ──────────────────────────────────────────────────────────────
  GET /v1/vehicles/:id/telemetry/latest  🔒
    resp 200: { latest:{id,latitude,longitude,speed,heading,battery,timestamp},
-               vehicle:{id,plate,isBlocked,lastUpdate,latitude,longitude,speed} }
+                vehicle:{id,plate,isBlocked,lastUpdate,latitude,longitude,speed} }
    latest = null se o veículo ainda não recebeu telemetria.
 
  GET /v1/vehicles/:id/telemetry/history?limit=10&after=ts  🔒
@@ -276,51 +293,25 @@
    resp 201: { ok:true, location:{id,userId,latitude,longitude,speed,heading,
                                   accuracy,timestamp,source} }
    400 sem lat/lng ou coordenadas fora de [-90..90]/[-180..180].
-   Usado pelo app Android (ApiClient) para enviar a posição do próprio celular.
+   Grava em RTDB mobile_locations/{uid} (estado atual, não histórico).
 
  GET /v1/mobile/location/latest  🔒
    resp 200: { location:{...} | null }  (última posição do usuário logado)
 
- ── Admin / sincronização ───────────────────────────────────────────────────
- POST /v1/admin/sync  🔒 (força uma rodada manual)
-   resp 200: { ok:true, enabled, durationMs, summary:{users,vehicles,routes,
-               telemetry,commands} }
-   enabled=false quando FIREBASE_SYNC_ENABLED não está ativo.
+ ── Registro do dispositivo móvel ───────────────────────────────────────────
+ POST /v1/mobile/device  🔒
+   body: { deviceName, vehicleId? }
+   resp 201/200: { ok:true, device:{id,userId,vehicleId,deviceName,createdAt,
+                                    updatedAt} }
+   400 sem deviceName; 404 se o veículo informado não pertence ao usuário.
+   Grava em mobile_devices/{uid} (1 doc por conta). O app chama no login/
+   cadastro/boot com Build.MANUFACTURER + Build.MODEL.
 
- GET /v1/admin/sync-status  🔒
-   resp 200: { enabled, intervalMs, lastRun }
+ GET /v1/mobile/device  🔒
+   resp 200: { device:{...} | null }
 
- ── Admin / frota (visão do administrador) ─────────────────────────────────
- Estas rotas dão ao PAINEL WEB acesso a QUALQUER veículo, de QUALQUER usuário
- (o app continua usando /v1/vehicles, restrito ao próprio dono). Todas exigem
- Authorization: Bearer (como o restante de /v1/admin).
-
- GET /v1/admin/vehicles  🔒
-   resp 200: { vehicles:[ serializedVehicle + { owner:{id,name,email,phone} } ] }
-   Lista TODOS os veículos cadastrados por todos os usuários, com o dono.
-   É o que popula o seletor e os marcadores do mapa no painel.
-
- GET /v1/admin/vehicles/:id  🔒
-   resp 200: { vehicle:{...owner}, device:{...}|null, owner:{...} }
-   404 se o veículo não existe.
-
- GET /v1/admin/vehicles/:id/telemetry/latest  🔒
-   resp 200: { latest:{...}|null, vehicle:{...}, owner:{...} }
-
- GET /v1/admin/vehicles/:id/telemetry/history?limit=&after=  🔒
-   resp 200: { points:[...] }
-
- GET /v1/admin/vehicles/:id/telemetry/stream  🔒  (SSE)
-   Mesmos eventos do stream do app (`telemetry`, `blocked`, `command`, `presence`).
-
- GET /v1/admin/overview  🔒
-   resp 200: { service, counts, sync, users:[...], vehicles:[ flattened + owner ],
-               screens:[...] }
-   O array `vehicles` é a frota inteira achatada (todos os usuários), com o
-   dono embutido — usado pelo mapa para desenhar a frota completa.
-   Além do SQLite, o overview lê do Firestore as contas/veículos enviados pelo
-   APP e mescla o que ainda não existe no backend (dedupe por email/placa; ids
-   da nuvem deslocados +1e9 para não colidir). Resumo em sync.inbound.
+ DELETE /v1/mobile/device  🔒
+   resp 200: { ok:true }
 
 
 ================================================================================
@@ -348,8 +339,8 @@
    headers: x-device-id, x-api-key
    body: { ok:true, note? }   (true=executou | false=falhou)
    resp 200: { command:{...status:'acknowledged'|'failed'} }
-   - Ao confirmar ok:true de block/unblock, o veículo muda is_blocked
-     (source de verdade p/ o app) e o evento SSE `blocked` é disparado.
+   - Ao confirmar ok:true de block/unblock, o veículo muda isBlocked
+     e o evento SSE `blocked` é disparado.
    - 403 se o comando pertence a outro veículo; 404 se não existe.
 
  GET /v1/hardware/:deviceId/status
@@ -386,121 +377,154 @@
 
 
 ================================================================================
- 9. SINCRONIZAÇÃO SQLITE -> FIREBASE
+ 9. PAINEL WEB DO ADMINISTRADOR (/v1/admin)
 ================================================================================
- Fica desligada por padrão (FIREBASE_SYNC_ENABLED=false). Quando ativada,
- espelha o SQLite no projeto Firebase do app ("securitas-ce0bd").
+ O painel web (raiz /, em public/index.html) é HTML+JS puro servido pela API.
+ Ele consome as rotas /v1/admin/*, que enxergam QUALQUER veículo de QUALQUER
+ usuário (o app continua restrito ao próprio dono via /v1/vehicles). Todas
+ exigem Authorization: Bearer (Firebase ID Token).
 
- Firestore (instância "securitas") - dados estruturados:
-  Escrita do backend (SQLite -> nuvem, firebase-sync.service.js):
-   users/{id}.set     { name, email, phone, createdAt }
-   vehicles/{id}.set  { id, userId, plate, model, brand, year, color,
-                        isBlocked, latitude, longitude, speed, lastUpdate,
-                        createdAt }
-   routes/{id}.set    { id, vehicleId, userId, startLatitude, startLongitude,
-                        endLatitude, endLongitude, startTime, endTime,
-                        distance, maxSpeed, status }
+ Tudo vem DIRETAMENTE do Firestore/RTDB (services/admin.service.js): não há
+ mais importação para banco local. O formato das respostas é o mesmo que o
+ painel já consumia (counts, users, vehicles, phoneVehicles, screens, service,
+ sync), para não mudar o contrato do HTML.
 
-  Escrita do APP (conta logada -> nuvem, FirebaseDataSource) - vinculada ao
-  Firebase Auth da conta que cadastrou. Mesmas coleções, campos a mais:
-   users/{id}.set     { name, email, phone, createdAt, firebaseUid }
-   vehicles/{id}.set  { ...os mesmos campos..., ownerUid, ownerEmail }
-  O app envia a conta logada + TODOS os seus veículos ao entrar (login/
-  registro) e mantém write-through a cada cadastro/edição/bloqueio/exclusão,
-  inclusive quando o backend REST está configurado.
+ GET /v1/admin/overview  🔒
+   resp 200: { service, counts, sync, users:[...], vehicles:[flattened+owner],
+               phoneVehicles, mobileDevices, screens:[...] }
+   - service: nome, versão, node, port, dbPath ("Firestore \"securitas\""),
+     uptime, pid.
+   - counts: users, vehicles, simulatedVehicles, realVehicles, blockedVehicles,
+     onlineVehicles, devices, simulatedDevices, realDevices, activeDevices,
+     telemetryPoints, routes, activeRoutes, completedRoutes, commands,
+     pendingCommands, mobileLocations, recentMobileLocations, mobileDevices,
+     phoneVehicles.
+   - users: um item por conta (users/ + quem só existe no app), com
+     vehicles[], mobileDevice, mobileLocation, realTest, firebaseUid.
+   - vehicles: frota inteira achatada (todos os usuários) com `owner` embutido
+     — usado pelo mapa para desenhar a frota completa.
+   - `simulated` de cada veículo é derivado do device virtual (model='server-sim').
+   - sync: estado do Firebase (enabled, credentials, databaseUrl, firestoreId).
 
- Realtime Database - baixa latência:
-   telemetry/{vehicleId}.set { latitude, longitude, speed, heading, timestamp }
-     -> o app escuta em FirebaseDataSource.listenTelemetry(vehicleId)
-   commands/{vehicleId}.set  { command, timestamp, status }
-     -> o app escuta em FirebaseDataSource.listenCommandResponse(vehicleId)
+ GET /v1/admin/vehicles  🔒
+   resp 200: { vehicles:[ serializedVehicle + { owner:{id,name,email} } ] }
+   Lista TODOS os veículos de todos os usuários, com o dono e a última
+   telemetria. É o que popula o seletor e os marcadores do mapa no painel.
 
- Watermark: tabela sync_state guarda o último updated_at sincronizado de cada
- entidade (users/vehicles/routes). Na 1ª rodada, linhas com updated_at=0
- também são enviadas (começa com -1).
+ GET /v1/admin/vehicles/:id  🔒
+   resp 200: { vehicle:{...owner}, device:{...}|null, owner:{...},
+               telemetry:{último ponto}|null }
+   404 se o veículo não existe.
 
- Rodada automática a cada FIREBASE_SYNC_INTERVAL_MS (padrão 60s) ou manual:
-   POST /v1/admin/sync  (exige Bearer do app)
+ GET /v1/admin/vehicles/:id/telemetry/latest  🔒
+   resp 200: { latest:{...}|null, vehicle:{...}, owner:{...} }
 
- Fontes: src/services/firebase-sync.service.js + src/firebase/firebase-admin.js.
+ GET /v1/admin/vehicles/:id/telemetry/history?limit=&after=  🔒
+   resp 200: { points:[...] }
 
- IMPORTANTE (documentado no PROXIMOS_PASSOS):
- - O backend usa o userId NUMÉRICO do seu banco como identidade. O app agora
-   envia também a conta do Firebase Auth (firebaseUid no doc do usuário e
-   ownerUid/ownerEmail no doc do veículo), o que permite ao painel atribuir
-   cada usuário/veículo à conta do app mesmo sem o id numérico bater.
- - google-services.json (do app) NÃO funciona no Admin SDK; o backend precisa
-   da chave privada (service account) em firebase-service-account.json.
+ GET /v1/admin/vehicles/:id/telemetry/stream  🔒  (SSE)
+   Mesmos eventos do stream do app (`presence`, `telemetry`, `blocked`,
+   `command`).
+
+ GET /v1/admin/vehicles/:id/simulation  🔒
+   resp 200: { simulation }
+
+ POST /v1/admin/vehicles/:id/simulation  🔒
+   body: { simulate: true|false }
+   resp 200: { simulation, vehicle, device }
+
+ POST /v1/admin/cloud/import  🔒
+   resp 200: { import:{ storage:'firestore', accounts, cloudVehicles, devices,
+                        importedAt } }
+   Resumo do que existe na nuvem (o Firestore JÁ é o banco da API).
+
+ ── Logs de requisição (buffer em memória) ─────────────────────────────────
+ GET /v1/admin/logs?since=&limit=  🔒
+   resp 200: { logs:[{seq,method,path,status,durationMs,at}], lastSeq }
+   since=<seq> devolve só o que é novo; limit 1..500 (padrão 200).
+
+ GET /v1/admin/logs/stream  🔒  (SSE)
+   Stream ao vivo das requisições (mesmo formato do SSE de telemetria).
+
+ GET /v1/admin/log-stats  🔒
+   resp 200: estatísticas do buffer (total, últimas janelas etc.)
 
 
 ================================================================================
  10. LIGAÇÃO COM O APP ANDROID
 ================================================================================
  [1] ApiLinkScreen (config de vínculo)
-   - O usuário informa a URL base da API (ex.: http://192.168.0.10:3000) e a
-     apiKey do rastreador (x-api-key). Grava em `api_configs` no SQLite local
-     (entidade ApiConfig).
-   - A tabela serve para as próximas versões do app chamar esta API; hoje o
-     fluxo principal do app usa direto Firebase (FirebaseDataSource).
+   - O usuário informa a URL base da API e a apiKey do rastreador
+     (x-api-key), gravados localmente (entidade ApiConfig).
+   - Hoje o fluxo principal do app usa direto Firebase (FirebaseDataSource)
+     e o Firebase Auth; a página serve para as próximas versões.
 
  [2] FirebaseDataSource.kt (formato que o app LÊ)
-   - Firestore: FirebaseFirestore.getInstance("securitas") -> coleções
-     users/vehicles/routes com EXATAMENTE os mesmos nomes de campos que o
-     backend.grava (plate, isBlocked, lastUpdate, etc.).
-     Detalhe: vehicles token "userId" como Long e consulta
-     .whereEqualTo("userId", userId) - o sync do backend grava userId
-     (Number) no mesmo caminho.
+   - Firestore: FirebaseFirestore.getInstance(FirebaseApp.getInstance(),
+     "securitas") -> coleções users/vehicles/routes com EXATAMENTE os mesmos
+     nomes de campos que a API usa (plate, isBlocked, lastUpdate, ownerUid...).
+   - O app grava users/{uid} + firebaseUid e vehicles/{id} + ownerUid/
+     ownerEmail ao entrar e a cada cadastro/edição/exclusão.
    - RTDB: telemetry/{vehicleId} e commands/{vehicleId} com os mesmos campos
      (latitude, longitude, speed, heading, timestamp / command, timestamp,
-     status). O backend.write bate com o que o app lê.
+     status). O que a API escreve bate com o que o app lê.
 
  [3] Comando block/unblock pelo app:
    - O app escreve em RTDB commands/{vehicleId} (status pending). O hardware
      físico NÃO lê o RTDB - ele usa a fila HTTP desta API. Para fechar o
-     ciclo neste backend, o fluxo é: app -> POST /v1/vehicles/:id/commands
-     -> hardware polling -> ACK -> SSE/RTDB `blocked`.
-   - A sincronização espelha o comando mais recente de cada veículo em
-     commands/{vehicleId} do RTDB, permitindo o app atualizar o status na
-     tela mesmo sem conexão aberta na stream SSE.
+     ciclo: app -> POST /v1/vehicles/:id/commands -> hardware polling -> ACK
+     -> SSE/RTDB `blocked`.
+
+ [4] Registro do celular:
+   - AuthRepository.ensureDeviceRegistered() chama POST /v1/mobile/device no
+     login/cadastro e no boot do app (quando já há sessão), enviando
+     Build.MANUFACTURER + Build.MODEL. A API grava em mobile_devices/{uid}.
 
 
 ================================================================================
  11. VARIÁVEIS DE AMBIENTE (.env)
 ================================================================================
  PORT                     porta HTTP (3000)
- DB_PATH                  caminho do SQLite (./data/securitas.db)
- JWT_SECRET               segredo de assinatura (trocar em produção)
- MAX_TELEMETRY_POINTS     pontos de telemetria mantidos por veículo (10000)
- SIMULATOR_INTERVAL_MS    intervalo do simulador (5000)
+ SIMULATOR_INTERVAL_MS    intervalo do simulador de hardware (5000)
  SIMULATOR_START_LAT/LNG  partida do simulador (-23.5505 / -46.6333)
- LOG_REQUESTS             log de requisições (true)
+ SIMULATION_ENABLED       liga a criação de rastreadores virtuais (true)
+ LOG_REQUESTS             log de requisições no console (true)
 
- FIREBASE_SYNC_ENABLED        liga o espelhamento p/ Firebase (false)
- FIREBASE_SYNC_INTERVAL_MS    intervalo da rodada automática (60000)
- FIREBASE_SERVICE_ACCOUNT     caminho do service account JSON
- FIREBASE_DATABASE_URL        URL do Realtime Database
- FIRESTORE_ID                 nome da instância Firestore ("securitas")
+ FIREBASE_SERVICE_ACCOUNT  caminho do service account JSON (obrigatório)
+ FIREBASE_DATABASE_URL     URL do Realtime Database (obrigatório)
+ FIRESTORE_ID              nome da instância Firestore ("securitas")
 
- Obs.: o config.js também lê variáveis do processo SEM .env (o e2e.js usa
- DB_PATH para rodar em banco temporário e ser determinístico).
+ Obs.: não existem mais DB_PATH, JWT_SECRET nem MAX_TELEMETRY_POINTS — não há
+ banco local nem token próprio; a identidade vem do Firebase Auth.
+
+ Regras de segurança (Firebase Rules): valem SÓ para o app Android — o backend
+ usa o Admin SDK, que ignora as regras.
+   backend/firebase/firestore.rules     -> Firestore (publicar: node scripts/deploy-rules.js)
+   backend/firebase/database.rules.json -> Realtime Database (aplicar no Console)
+
+ Acesso do app à API local: o Android bloqueia HTTP em texto claro por padrão.
+ O app libera apenas os destinos de desenvolvimento em
+   app/src/main/res/xml/network_security_config.xml
+ (localhost/127.0.0.1 via `adb reverse tcp:3000 tcp:3000`, 10.0.2.2 do emulador,
+ e 192.168.0.10 da rede local). Todo o restante continua exigindo HTTPS.
 
 
 ================================================================================
  12. COMANDOS ÚTEIS
 ================================================================================
- Sober a API:              node src/server.js
- Testar ponta a ponta:     node tests/e2e.js        (esperado: 27 passou)
- Dados demo:               npm run seed
- Simulador GPS:            VTSIM_DEVICE_ID=.. VTSIM_API_KEY=.. npm run simulator
- Teste rápido de health:   curl http://localhost:3000/health
+ Subir a API:              node src/server.js
+ Subir API + simuladores:  npm run api          (./api.sh start)
+ Parar tudo:               npm run api:stop
+ Estado / logs:            npm run api:status | npm run api:logs
+
+ Simulador GPS (um device): VTSIM_DEVICE_ID=.. VTSIM_API_KEY=.. npm run simulator
+ Teste rápido de health:    curl http://localhost:3000/health
+ Referência de rotas:       curl http://localhost:3000/api
 
  Exemplo de chamada completa (app):
-   curl -X POST http://localhost:3000/v1/auth/login \
-        -H 'Content-Type: application/json' \
-        -d '{"email":"aluno@tcc.com","password":"securitas123"}'
-   # -> copia token
+   # o token vem do Firebase Auth no app; aqui usamos um ID Token válido
    curl http://localhost:3000/v1/vehicles \
-        -H 'Authorization: Bearer <token>'
+        -H 'Authorization: Bearer <id-token>'
 
  Exemplo de telemetria (hardware):
    curl -X POST http://localhost:3000/v1/hardware/telemetry \
@@ -508,108 +532,51 @@
         -H 'x-device-id: <device_id>' -H 'x-api-key: <api_key>' \
         -d '{"latitude":-23.5505,"longitude":-46.6333,"speed":40,"heading":90}'
 
-================================================================================
-================================================================================
- SINCRONIZACAO COM FIREBASE
-================================================================================
- O backend espelha o SQLite no Firebase a cada FIREBASE_SYNC_INTERVAL_MS:
-
-   Firestore  users     -> {name, email, phone, createdAt}
-   Firestore  vehicles  -> posicao, placa, modelo, bloqueio
-   Firestore  routes    -> origem, destino, distancia, velocidade maxima
-   RTDB       telemetry -> ultima posicao de cada veiculo (telemetry/<id>)
-   RTDB       commands  -> comandos pendentes por veiculo (commands/<id>)
-
- No sentido inverso, o APP Android tambem grava no Firestore (FirebaseDataSource):
- a conta logada (users/{id} + firebaseUid) e os veiculos dela (vehicles/{id} +
- ownerUid/ownerEmail), ao entrar e a cada alteracao. O painel do admin le essas
- colecoes e mescla ao SQLite (overview.service.js), exibindo o que veio do app.
-
- ATENCAO: a senha nunca vai para o Firebase. O espelho de "users" e apenas
- de dados; nao ha login via Firebase Auth. A senha local usa scrypt, e o
- Firebase Auth so importa hash bcrypt - migrar as senhas exigiria redefinir
- todas elas.
-
- PASSO QUE FALTA (somente voce pode fazer):
-   1. Firebase Console > Configuracoes > Contas de servico
-   2. "Adicionar conta de servico" > "Conta de servico"
-   3. Copie a chave privada gerada
-   4. Salve o arquivo exatamente em:
-        backend/firebase-service-account.json
-   O .env ja aponta para esse caminho (FIREBASE_SERVICE_ACCOUNT) e o
-   .gitignore ja protege o arquivo. Nao versione essa chave.
-
-   Enquanto o arquivo nao existir, a API sobe normal e o log mostra:
-     [firebase] Service account nao encontrado: ...
-
-   O Admin SDK precisa de permissao no projeto para escrever:
-   - Firestore: criar e atualizar documentos
-   - Realtime Database: escrever nos nos telemetry/ e commands/
-
-   Apos colocar a chave, force o reenvio de tudo:
-     curl -X POST 'http://localhost:3000/v1/admin/sync?full=1' \
-          -H 'Authorization: Bearer <token>'
-
-   O parametro ?full=1 zera as marcas d'agua e reenvia todas as colecoes.
-   Sem ele, so o que mudou desde a ultima rodada e enviado.
-
-   Conferir o estado:
-     curl http://localhost:3000/v1/admin/sync-status \
-          -H 'Authorization: Bearer <token>'
 
 ================================================================================
- FROTA / SIMULACAO SIMULTANEA
+ 13. SIMULAÇÃO DE FROTA E TESTE REAL x SIMULADOR
 ================================================================================
- Varios veiculos podem ser simulados ao mesmo tempo, cada um com seu device.
+ Vários veículos podem ser simulados ao mesmo tempo, cada um com seu device.
 
-   Criar a frota (o primeiro veiculo e o principal, os demais sao derivados):
-     SEED_FLEET=5 npm run seed
-
-   Subir a API + um simulador por veiculo:
+   Subir a API + um simulador por veículo:
      npm run api
 
-   O ./api.sh sobe um processo node por veiculo que tenha device vinculado,
-   cada um com PID e log proprios em .run/sim-<n>.pid.
+   O ./api.sh lê a frota do FIRESTORE via `node src/list-devices.js` (exclui
+   os devices virtuais server-sim), e sobe um processo node por device, cada
+   um com PID e log próprios em .run/sim-<n>.pid.
 
-   Variaveis uteis:
-     SIM_FLEET=2          limita quantos veiculos simular
-     START_SIMULATOR=false sobe so a API
-     VTSIM_DEVICE_ID / VTSIM_API_KEY  fixa um unico veiculo
+   Variáveis úteis:
+     SIM_FLEET=2          limita quantos veículos simular
+     START_SIMULATOR=false sobe só a API
+     VTSIM_DEVICE_ID / VTSIM_API_KEY  fixa um único veículo
 
-   Cada simulador retoma da posicao atual do seu veiculo (campo /status),
-   entao a frota nao nasce empilhada em um unico ponto.
+   Cada simulador retoma da posição atual do seu veículo (campo /status),
+   então a frota não nasce empilhada em um único ponto.
 
-   Na pagina inicial (http://localhost:3000), use o seletor de veiculos para
+   Na página inicial (http://localhost:3000), use o seletor de veículos para
    acompanhar cada um. A antiga URL /debug redireciona para a raiz.
 
-================================================================================
- TESTE REAL X SIMULADOR (exibicao web)
-================================================================================
- O painel da raiz distingue dados do simulador dos dados de TESTE REAL, que
- entram por fora da simulacao (app mobile / API de uso real).
+ ── Teste real x simulador ────────────────────────────────────────────────
+   O Firestore não guarda o flag `simulated` no veículo. A origem é DERIVADA
+   do device vinculado:
+     device.model = 'server-sim'  -> frota em SIMULAÇÃO
+     device.model != 'server-sim' -> veículo de TESTE REAL (criado via
+                                     /v1/vehicles, app) ou hardware físico
 
-   Origem dos dados (colunas `simulated` em vehicles e devices):
-     simulated = 1  -> frota criada por `npm run seed` e seus simuladores
-     simulated = 0  -> veiculos/devices criados via /v1/vehicles (app/tests)
-                        e posicoes do celular (/v1/mobile/location)
+   O que a página apresenta como "teste real (fora da simulação)":
+     - posições do celular recebidas do app (RTDB mobile_locations);
+     - veículos sem device virtual;
+     - badge "teste real" x "simulador" em cada veículo da lista;
+     - marcador azul do celular junto do veículo quando o proprietário já
+       enviou a posição pelo app (legenda "Celular (teste real)").
 
-   O que a pagina apresenta como "teste real (fora da simulacao)":
-     - posicoes do celular recebidas do app (mobile_locations);
-     - veiculos com simulated = 0;
-     - badge "teste real" x "simulador" em cada veiculo da lista de usuarios;
-     - cartao "Teste real" no topo e painel dedicado na coluna esquerda;
-     - no mapa, marcador azul do celular junto do veiculo quando o proprietario
-       ja enviou a posicao pelo app (legenda "Celular (teste real)").
-
-   O overview (/v1/admin/overview) expoe: counts.simulatedVehicles,
+   O overview (/v1/admin/overview) expõe counts.simulatedVehicles,
    counts.realVehicles, counts.simulatedDevices, counts.realDevices e, por
-   usuario, vehicles[].simulated, devices[].simulated e user.realTest.
-   Expoe tambem `vehicles` (frota inteira achatada, com `owner`) e, por isso,
-   o painel exibe no mapa TODOS os veiculos de TODOS os usuarios.
+   usuário, vehicles[].simulated e user.realTest.
 
-   Visao do administrador x visao do app:
-     - O app (ApiClient) usa /v1/vehicles*, restrito ao veiculo do proprio dono.
-     - O painel web usa /v1/admin/vehicles*, que enxerga qualquer veiculo de
-       qualquer usuario (a frota inteira), com o dono identificado.
+   Visão do administrador x visão do app:
+     - O app usa /v1/vehicles*, restrito ao veículo do próprio dono.
+     - O painel web usa /v1/admin/vehicles*, que enxerga qualquer veículo de
+       qualquer usuário (a frota inteira), com o dono identificado.
 
 ================================================================================

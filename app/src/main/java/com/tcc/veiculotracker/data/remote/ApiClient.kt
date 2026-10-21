@@ -2,12 +2,14 @@ package com.tcc.veiculotracker.data.remote
 
 import android.content.Context
 import android.util.Log
+import com.google.firebase.auth.FirebaseAuth
 import com.tcc.veiculotracker.util.Constants
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.tasks.await
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -43,21 +45,28 @@ class ApiClient(private val context: Context) {
         get() = prefs.getString(Constants.KEY_API_URL, DEFAULT_BASE_URL) ?: DEFAULT_BASE_URL
         set(value) = prefs.edit().putString(Constants.KEY_API_URL, value).apply()
 
+    // A API valida o Firebase ID Token; não há uma segunda sessão no backend.
     var authToken: String?
-        get() = prefs.getString(Constants.KEY_API_TOKEN, null)
-        set(value) = prefs.edit().putString(Constants.KEY_API_TOKEN, value).apply()
+        get() = FirebaseAuth.getInstance().currentUser?.getIdToken(false)?.result?.token
+        set(@Suppress("UNUSED_PARAMETER") value) = Unit
 
     val isConfigured: Boolean
-        get() = baseUrl.isNotBlank() && authToken != null
+        get() = baseUrl.isNotBlank() && FirebaseAuth.getInstance().currentUser != null
 
-    // ── Auth ──────────────────────────────────────────────────────────────
+    // ── Auth (legado) ─────────────────────────────────────────────────────
+    // O login agora é feito no Firebase Auth (AuthRepository), no próprio app.
+    // A API apenas valida o ID Token; as rotas /v1/auth/register e /v1/auth/login
+    // deixaram de existir na migração. Estes métodos e DTOs permanecem para não
+    // quebrar referências antigas, mas falham de forma explícita.
 
+    @Deprecated("Use Firebase Auth (AuthRepository)")
     data class AuthResponse(
         val user: UserDto,
         val token: String,
         val expiresAt: Long
     )
 
+    @Deprecated("Use o UID do Firebase Auth")
     data class UserDto(
         val id: Long,
         val name: String,
@@ -66,32 +75,16 @@ class ApiClient(private val context: Context) {
         val createdAt: Long
     )
 
-    suspend fun register(name: String, email: String, password: String, phone: String): Result<AuthResponse> {
-        val body = mapOf("name" to name, "email" to email, "password" to password, "phone" to phone)
-        return post("/v1/auth/register", body, auth = false).map { json ->
-            val obj = JsonParser.parseString(json).asJsonObject
-            AuthResponse(
-                user = gson.fromJson(obj.getAsJsonObject("user"), UserDto::class.java),
-                token = obj.get("token").asString,
-                expiresAt = obj.get("expiresAt").asLong
-            )
-        }
-    }
+    @Deprecated("Use Firebase Auth (AuthRepository.registerWithEmail)")
+    suspend fun register(name: String, email: String, password: String, phone: String): Result<AuthResponse> =
+        Result.failure(UnsupportedOperationException("Cadastro é feito no Firebase Auth"))
 
-    suspend fun login(email: String, password: String): Result<AuthResponse> {
-        val body = mapOf("email" to email, "password" to password)
-        return post("/v1/auth/login", body, auth = false).map { json ->
-            val obj = JsonParser.parseString(json).asJsonObject
-            AuthResponse(
-                user = gson.fromJson(obj.getAsJsonObject("user"), UserDto::class.java),
-                token = obj.get("token").asString,
-                expiresAt = obj.get("expiresAt").asLong
-            )
-        }
-    }
+    @Deprecated("Use Firebase Auth (AuthRepository.signInWithEmail)")
+    suspend fun login(email: String, password: String): Result<AuthResponse> =
+        Result.failure(UnsupportedOperationException("Login é feito no Firebase Auth"))
 
     suspend fun logout(): Result<Boolean> {
-        return post("/v1/auth/logout", emptyMap()).map { true }
+        return Result.success(true)
     }
 
     /**
@@ -132,6 +125,32 @@ class ApiClient(private val context: Context) {
             val obj = JsonParser.parseString(json).asJsonObject
             val location = obj.get("location")
             if (location.isJsonNull) null else gson.fromJson(location, MobileLocationDto::class.java)
+        }
+    }
+
+    // ── Registro de dispositivo móvel ────────────────────────────────────
+
+    data class MobileDeviceDto(
+        val id: Long,
+        val userId: Long,
+        val vehicleId: Long?,
+        val deviceName: String,
+        val createdAt: Long,
+        val updatedAt: Long
+    )
+
+    /**
+     * Registra (ou atualiza) o dispositivo no backend.
+     * Chamado após login/registro bem-sucedido.
+     */
+    suspend fun registerMobileDevice(deviceName: String, vehicleId: Long? = null): Result<MobileDeviceDto> {
+        val body = buildMap<String, Any?> {
+            put("deviceName", deviceName)
+            if (vehicleId != null) put("vehicleId", vehicleId)
+        }
+        return post("/v1/mobile/device", body).map { json ->
+            val obj = JsonParser.parseString(json).asJsonObject
+            gson.fromJson(obj.getAsJsonObject("device"), MobileDeviceDto::class.java)
         }
     }
 
@@ -334,7 +353,7 @@ class ApiClient(private val context: Context) {
     private suspend fun get(path: String): Result<String> = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url("$baseUrl$path")
-            .apply { authToken?.let { header("Authorization", "Bearer $it") } }
+            .apply { firebaseBearer()?.let { header("Authorization", it) } }
             .get()
             .build()
         execute(request)
@@ -346,7 +365,7 @@ class ApiClient(private val context: Context) {
         val request = Request.Builder()
             .url("$baseUrl$path")
             .apply {
-                if (auth) authToken?.let { header("Authorization", "Bearer $it") }
+                if (auth) firebaseBearer()?.let { header("Authorization", it) }
             }
             .post(requestBody)
             .build()
@@ -358,7 +377,7 @@ class ApiClient(private val context: Context) {
         val requestBody = json.toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
             .url("$baseUrl$path")
-            .apply { authToken?.let { header("Authorization", "Bearer $it") } }
+            .apply { firebaseBearer()?.let { header("Authorization", it) } }
             .put(requestBody)
             .build()
         execute(request)
@@ -367,7 +386,7 @@ class ApiClient(private val context: Context) {
     private suspend fun delete(path: String): Result<String> = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url("$baseUrl$path")
-            .apply { authToken?.let { header("Authorization", "Bearer $it") } }
+            .apply { firebaseBearer()?.let { header("Authorization", it) } }
             .delete()
             .build()
         execute(request)
@@ -390,8 +409,36 @@ class ApiClient(private val context: Context) {
                 Result.failure(Exception(errorMsg))
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Request failed: ${e.message}")
-            Result.failure(e)
+            val friendly = friendlyNetworkError(e)
+            Log.e(TAG, "Request failed: $friendly (${e.javaClass.simpleName})")
+            Result.failure(Exception(friendly, e))
         }
     }
+
+    /**
+     * Traduz erros de conexão (OkHttp/Java) em mensagens acionáveis em PT-BR.
+     * O texto padrão do OkHttp ("Failed to connect to /192.168.0.10:3000") não
+     * diz ao usuário o que fazer quando o backend está fora do ar ou o celular
+     * está em outra rede.
+     */
+    private fun friendlyNetworkError(e: Exception): String {
+        val root = generateSequence<Throwable>(e) { it.cause }.last()
+        return when (root) {
+            is java.net.UnknownHostException ->
+                "Não foi possível resolver o endereço da API ($baseUrl). Confira o IP do servidor em Configurações > Vínculo de API."
+            is java.net.ConnectException, is java.net.SocketTimeoutException ->
+                "Sem conexão com a API em $baseUrl. Verifique se o backend está no ar (./api.sh start) e se o celular está na mesma rede Wi-Fi do servidor."
+            is java.io.IOException ->
+                "Falha de rede ao falar com $baseUrl (${root.javaClass.simpleName}). Tente novamente."
+            else -> e.message ?: "Falha de rede ao falar com $baseUrl."
+        }
+    }
+
+    /** Obtém um token atual do Firebase para cada requisição autenticada. */
+    private suspend fun firebaseBearer(): String? =
+        FirebaseAuth.getInstance().currentUser
+            ?.getIdToken(false)
+            ?.await()
+            ?.token
+            ?.let { "Bearer $it" }
 }

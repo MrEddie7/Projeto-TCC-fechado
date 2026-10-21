@@ -1,11 +1,6 @@
 package com.tcc.veiculotracker.ui.screens.apilink
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -14,7 +9,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tcc.veiculotracker.ui.theme.Active
@@ -51,8 +45,11 @@ fun ApiLinkScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showAddDialog = true }) {
-                Icon(Icons.Default.Add, contentDescription = "Adicionar API")
+            FloatingActionButton(onClick = {
+                apiUrl = state.apiUrl
+                showAddDialog = true
+            }) {
+                Icon(Icons.Default.Add, contentDescription = "Configurar API")
             }
         }
     ) { padding ->
@@ -74,9 +71,9 @@ fun ApiLinkScreen(
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(4.dp))
-                    if (state.activeConfig != null) {
+                    if (state.apiUrl.isNotBlank()) {
                         Text(
-                            text = state.activeConfig!!.apiUrl,
+                            text = state.apiUrl,
                             style = MaterialTheme.typography.bodyMedium,
                             color = Active
                         )
@@ -90,15 +87,38 @@ fun ApiLinkScreen(
                 }
             }
 
-            Text(
-                text = "APIs configuradas",
-                modifier = Modifier.padding(horizontal = 16.dp),
-                style = MaterialTheme.typography.titleMedium
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            if (state.configs.isEmpty()) {
+            if (state.apiUrl.isNotBlank()) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .padding(12.dp)
+                            .fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                state.apiUrl,
+                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                "Token configurado",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                            )
+                        }
+                        IconButton(onClick = { viewModel.clearConfig() }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Remover", tint = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            } else {
                 Box(
                     modifier = Modifier.fillMaxWidth().padding(32.dp),
                     contentAlignment = Alignment.Center
@@ -107,51 +127,6 @@ fun ApiLinkScreen(
                         Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f))
                         Spacer(modifier = Modifier.height(8.dp))
                         Text("Nenhuma API vinculada", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
-                    }
-                }
-            } else {
-                LazyColumn(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(state.configs) { config ->
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            Row(
-                                modifier = Modifier
-                                    .padding(12.dp)
-                                    .fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Default.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(config.apiUrl, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
-                                    if (config.apiKey.isNotBlank()) {
-                                        Text(
-                                            "Chave: ${config.apiKey.take(8)}...",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                                        )
-                                    }
-                                }
-                                if (config.isActive) {
-                                    Surface(
-                                        shape = MaterialTheme.shapes.small,
-                                        color = Active.copy(alpha = 0.1f)
-                                    ) {
-                                        Text(
-                                            "Ativa",
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                            style = MaterialTheme.typography.labelLarge,
-                                            color = Active
-                                        )
-                                    }
-                                }
-                                IconButton(onClick = { viewModel.deleteConfig(config) }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Excluir", tint = MaterialTheme.colorScheme.error)
-                                }
-                            }
-                        }
                     }
                 }
             }
@@ -173,7 +148,7 @@ fun ApiLinkScreen(
                         label = { Text("URL da API *") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
-                        placeholder = { Text("https://api.exemplo.com/v1") }
+                        placeholder = { Text("http://192.168.0.10:3000") }
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(

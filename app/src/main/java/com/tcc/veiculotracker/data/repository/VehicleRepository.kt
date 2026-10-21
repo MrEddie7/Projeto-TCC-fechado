@@ -24,6 +24,12 @@ class VehicleRepository(
     /** Tempo desde a última atualização do cache, em ms. */
     fun offlineCacheAgeMs(): Long = syncManager.offlineCacheAgeMs()
 
+    /**
+     * Cria o veículo no Firestore. No modelo novo a criação passa pelo backend
+     * (que grava ownerUid + telemetria); sem backend, grava direto na nuvem.
+     * Regravar um veículo que só mudou de posição do simulador sobrescreveria
+     * os dados da API, então a criação é separada da atualização.
+     */
     suspend fun registerVehicle(vehicle: VehicleModel): VehicleModel {
         val backend = syncManager.backendRepository
         if (backend != null && backend.isConfigured) {
@@ -34,7 +40,7 @@ class VehicleRepository(
             }.getOrNull()
             val created = result?.getOrNull()
             if (created != null) {
-                runCatching { syncManager.syncVehicle(created) }
+                // O backend já gravou no Firestore; nada a publicar de novo.
                 return created
             }
         }
@@ -54,14 +60,24 @@ class VehicleRepository(
         syncManager.refreshOfflineCache(remote)
     }
 
+    /**
+     * Edição cadastral. Com backend configurado, só a API altera o documento
+     * (evita `set` completo com dados defasados do Firestore).
+     */
     suspend fun updateVehicle(vehicle: VehicleModel) {
         val backend = syncManager.backendRepository
         if (backend != null && backend.isConfigured) {
             runCatching { backend.updateVehicle(vehicle) }
+            return
         }
         runCatching { syncManager.syncVehicle(vehicle) }
     }
 
+    /**
+     * Bloqueio/desbloqueio. A mudança de estado é feita pelo hardware (ACK do
+     * comando); aqui só refletimos no Firestore quando não há backend, para o
+     * app não gravar estado que o servidor acabaria sobrescrevendo.
+     */
     suspend fun setBlocked(vehicleId: Long, blocked: Boolean, vehicle: VehicleModel) {
         val updated = vehicle.copy(isBlocked = blocked)
         val backend = syncManager.backendRepository
@@ -76,18 +92,18 @@ class VehicleRepository(
                     "isBlocked" to blocked
                 ))
             }
+            return
         }
         runCatching { syncManager.syncVehicle(updated) }
     }
 
+    /**
+     * Atualização de posição vinda de um observer. NÃO grava no Firestore: a
+     * API/telemetria é a dona desses campos e regravar aqui apagaria a posição
+     * real do servidor. Mantido para compatibilidade (no-op).
+     */
     suspend fun updateLocation(vehicleId: Long, lat: Double, lng: Double, speed: Double, vehicle: VehicleModel) {
-        val updated = vehicle.copy(
-            latitude   = lat,
-            longitude  = lng,
-            speed      = speed,
-            lastUpdate = System.currentTimeMillis()
-        )
-        runCatching { syncManager.syncVehicle(updated) }
+        // Intencionalmente vazio — ver comentário acima.
     }
 
     suspend fun deleteVehicle(vehicle: VehicleModel) {
