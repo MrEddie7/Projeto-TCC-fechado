@@ -9,6 +9,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.tcc.veiculotracker.App
 import com.tcc.veiculotracker.data.model.VehicleModel
+import com.tcc.veiculotracker.ui.components.MapFocusTarget
 import com.tcc.veiculotracker.util.Constants
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -29,7 +30,9 @@ data class TrackingState(
     val isPhoneVisible: Boolean = false,
     val phonePermissionGranted: Boolean = false,
     val isPhoneSending: Boolean = false,
-    val phoneLastSentAt: Long = 0L
+    val phoneLastSentAt: Long = 0L,
+    // ── Onde a câmera do mapa deve focalizar: veículo ou celular ──
+    val mapFocusTarget: MapFocusTarget = MapFocusTarget.VEHICLE
 )
 
 class TrackingViewModel(application: Application) : AndroidViewModel(application) {
@@ -88,6 +91,14 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             currentLatitude = vehicle.latitude,
             currentLongitude = vehicle.longitude
         )
+    }
+
+    /**
+     * Escolha feita pelo usuário na caixa de opção do mapa: focalizar a
+     * localização do VEÍCULO ou a do CELULAR no momento de localizar.
+     */
+    fun setMapFocusTarget(target: MapFocusTarget) {
+        _state.value = _state.value.copy(mapFocusTarget = target)
     }
 
     fun startTracking() {

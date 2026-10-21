@@ -1,0 +1,351 @@
+================================================================================
+  SECURITAS - RASTREADOR VEICULAR IoT
+  GUIA DE LIGACOES (PINAGEM) - ESP32 DevKit V1 (38 pinos)
+================================================================================
+  Projeto: TCC - Sistema de rastreamento veicular
+  Firmware: hardware/firmware/ (PlatformIO + Arduino framework)
+  Protocolo da API: ver backend/API_ESTRUTURA.txt, secao 7
+--------------------------------------------------------------------------------
+  REVISAO      DATA          AUTOR          OBSERVACAO
+  1.0          21/10/2026    TCC            Versao inicial
+================================================================================
+
+
+================================================================================
+  1. LISTA DE MATERIAL (BOM)
+================================================================================
+
+  #   COMPONENTE                          QTD   OBSERVACAO
+  --  ----------------------------------  ----  ------------------------------
+  1   ESP32 DevKit V1 (38 pinos)          1     MCU principal, Wi-Fi/BT
+  2   Modulo GPS u-blox NEO-M8N           1     GPS + GLONASS, UART 9600
+  3   Modulo 4G LTE SIM7600G-H            1     Breakout, UART (AT commands)
+  4   Receptor RF 433 MHz (RXB6/SYN480R)  1     Antena do controle/segredo
+  5   Modulo rele 12V (1 canal, opto)     1     Corte da ignicao
+  6   PC817 (optocopler)                  1     Isola o GPIO do rele
+  7   Transistor NPN 2N2222               1     Driver do rele
+  8   Diodo 1N4007                        1     Diodo de roda-livre no rele
+  9   Resistores 1k / 10k / 4k7            -     Ver secao 4 (pull-ups/divisor)
+  10  Buck LM2596 (ou MP1584EN)           1     12V -> 5V (alimentacao logica)
+  11  BMS 3S 20A (12.6V)                  1     Gerencia das 3 celulas
+  12  Bateria Li-ion 3S (3x 18650)        1     ~11.1V nominal / 12.6V cheio
+  13  Fusivel + porta-fusivel 2A          1     Protecao da linha 12V
+  14  TVS Diode SMBJ36CA                  1     Protecao de transientes 12V
+  15  Divisor de tensao (100k/22k)        1     Leitura da tensao da bateria
+  16  LED + resistor 330R                  -     Status (opcional)
+
+
+================================================================================
+  2. DIAGRAMA DE BLOCOS
+================================================================================
+
+        BATERIA 3S (11.1V)           BMS 3S 20A             FUSIVEL 2A + TVS
+        [18650][18650][18650]  -->  [B+/B-/B1/B2/P+/P-]  -->  [12V protegido]
+                                                                  |
+                    +---------------------------------------------+-----------+
+                    |                                             |           |
+                    v                                             v           v
+            [BUCK 12V->5V]                              [RELE 12V + PC817]   |
+                    | 5V                                      |              |
+                    v                                         (ignicao)       |
+   +----------------+----------------+                                       |
+   |                |                |                                       |
+   v                v                v                                       |
+[ESP32 VIN]    [GPS VCC]      [SIM7600 VCC]  <-- 4G                        [ADC 12V]
+   |                |                |                                       |
+   |               TX/RX            TX/RX                                    |
+   |             (UART2)          (UART1)                                    |
+   |                                                                         |
+   +------------------------[divisor 100k/22k]-------------------------------+
+   |
+   +--[GPIO - RF 433 DATA]
+
+   Wi-Fi/BT: a nuvem (API securitas-backend)
+
+
+================================================================================
+  3. PINAGEM DO ESP32 DevKit V1 (38 pinos)
+================================================================================
+
+  ----- LADO ESQUERDO (de cima para baixo, com a porta USB para baixo) -----
+
+  PINO   GPIO   FUNCAO NO PROJETO            CONECTA EM
+  ----   ----   --------------------------  ----------------------------------
+  3V3    --     Saida 3.3V                  GPS VCC (se modulo for 3.3V)
+  EN     --     Reset (botao)               -- (deixar livre)
+  VP     36     ADC1_CH0 (input only)       Divisor da bateria (ADC 12V)
+  VN     39     ADC1_CH3 (input only)       Livre (reserva de ADC)
+  D34    34     INPUT only                  Saida DATA do receptor RF 433
+  D35    35     INPUT only                  Livre
+  D32    32     GPIO32                      Livre / buzzer opcional
+  D33    33     GPIO33                      Livre
+  D25    25     GPIO25 / DAC1               UART1 RX <- TXD do modem 4G
+  D26    26     GPIO26 / DAC2               UART1 TX -> RXD do modem 4G
+  D27    27     GPIO27                      PWRKEY do modem 4G (pulso ~1s)
+  D14    14     GPIO14 (HSPI CLK)           Livre
+  D12    12     GPIO12 (strapping!)         Livre (evitar uso no boot)
+  GND    --     Terra                       Barramento GND
+  D13    13     GPIO13 (HSPI MOSI)          Livre
+
+  ----- LADO DIREITO (de cima para baixo) -----
+
+  PINO   GPIO   FUNCAO NO PROJETO            CONECTA EM
+  ----   ----   --------------------------  ----------------------------------
+  VIN    --     Entrada 5V (direto do buck) Alimentacao 5V do BUCK LM2596
+  GND    --     Terra                       Barramento GND
+  D15    15     GPIO15 (strapping!)         Livre (evitar uso no boot)
+  D2     2      GPIO2  (LED onboard)        LED de status (onboard, azul)
+  D4     4      GPIO4                       Livre (opcional: PPS do GPS)
+  RX2    16     GPIO16 - UART2 RX           GPS NEO-M8N TX
+  TX2    17     GPIO17 - UART2 TX           GPS NEO-M8N RX
+  D5     5      GPIO5  (strapping!)         Livre
+  D18    18     GPIO18 - SPI CLK            Livre
+  D19    19     GPIO19 - SPI MISO           Livre
+  D21    21     GPIO21 - I2C SDA            Livre (sensores futuros)
+  RX0    3      GPIO3  - UART0 RX (USB)     USB serial / debug
+  TX0    1      GPIO1  - UART0 TX (USB)     USB serial / debug
+  D22    22     GPIO22 - I2C SCL            Livre (sensores futuros)
+  D23    23     GPIO23 - SPI MOSI           Entrada do driver do rele (PC817)
+
+  ATENCAO (pinos "strapping"): 0, 2, 12, 15 afetam o modo de boot. Nao
+  coloque sinal externo neles na energizacao se quiser evitar boot indevido.
+
+
+================================================================================
+  4. LIGACOES DETALHADAS POR MODULO
+================================================================================
+
+  ------------------------------------------------------------------------------
+  4.1  GPS u-blox NEO-M8N  (UART2 do ESP32)
+  ------------------------------------------------------------------------------
+   Usa Serial2 (GPIO16/17). Baud 9600 (padrao de fabrica do NEO-M8N).
+
+   NEO-M8N      ESP32 DevKit V1     OBSERVACAO
+   --------     ----------------    ------------------------------------------
+   VCC     -->  VIN (5V do buck)    NEO-M8N aceita 3.3V..5V. Se for a versao
+                                    3.3V pura, ligar em 3V3.
+   GND     -->  GND                 Terra comum
+   TX      -->  RX2  (GPIO16)       TX do GPS -> RX do ESP32
+   RX      -->  TX2  (GPIO17)       RX do GPS -> TX do ESP32
+   PPS     -->  (opcional)          Pulso 1PPS: usar GPIO4 se quiser precisao
+
+   Cabo recomendado: fios curtos (<20cm) e longe dos fios de potencia.
+   No boot o modulo pode levar 30s-1min para obter "fix" (LED piscando 1Hz).
+   Sem fix inicial: o firmware espera o fix antes de enviar telemetria.
+   Antena ativa: colocar com a face ceramica voltada para cima/ceu.
+
+  ------------------------------------------------------------------------------
+  4.2  Modulo 4G LTE SIM7600G-H  (UART1 do ESP32)
+  ------------------------------------------------------------------------------
+   O SIM7600 trabalha com comandos AT. Usamos Serial1 (GPIO25/26 por padrao
+   no firmware; veja firmware/src/config.h). Nivel logico do breakout: 3.3V.
+
+   SIM7600      ESP32 DevKit V1     OBSERVACAO
+   --------     ----------------    ------------------------------------------
+   TXD     -->  GPIO25 (RX1)        TX do modem -> RX do ESP32
+   RXD     -->  GPIO26 (TX1)        RX do modem -> TX do ESP32
+   GND     -->  GND                 Terra comum (OBRIGATORIO)
+   VBAT    -->  5V do buck*         *Ver NOTA DE ALIMENTACAO abaixo
+   PWRKEY  -->  GPIO27              Pulso de ~1s liga/desliga o modem
+   VIN     -->  (se houver)         Pode ser ligado em 3V3 ou 5V conforme placa
+
+   NOTA DE ALIMENTACAO (MUITO IMPORTANTE):
+   - O SIM7600 pode consumir PICOS de ate 2A ao registrar na rede celular.
+   - O buck LM2596 (tipico 2A) pode nao sustentar o pico -> use MP1584EN
+     (ate 3A) ou adicione um capacitor eletrolitico de 470uF..1000uF perto
+     do VBAT do modem para absorver os picos.
+   - NUNCA alimente o SIM7600 pelo 3.3V do ESP32: a corrente derruba o MCU.
+   - PWRKEY: o TinyGSM 0.12 nao gerencia este pino, entao o firmware pulsa
+     o GPIO27 por ~1s para LIGAR o modem. O pulso acontece uma unica vez por
+     boot (repetir desligaria o modem ja ligado); se o modem nao responder,
+     o firmware pulsa uma segunda vez e tenta de novo.
+
+   Antena LTE: conectar a antena principal no conector SMA "MAIN".
+   Chip SIM: inserir com o modem desligado; sem PIN (ou configurar no firmware).
+
+  ------------------------------------------------------------------------------
+  4.3  Modulo GPS/GSM x Wi-Fi (escolha da rota de dados)
+  ------------------------------------------------------------------------------
+   O firmware tenta primeiro o Wi-Fi (mais barato/rapido). Se nao houver
+   credencial ou falhar, usa a rede celular via SIM7600 (AT+CIPSTART etc.).
+   Configure as credenciais em firmware/src/secrets.h.
+
+  ------------------------------------------------------------------------------
+  4.4  Receptor RF 433 MHz (RXB6 / SYN480R)
+  ------------------------------------------------------------------------------
+   Usado como "chave de presenca"/segredo (ex.: sirene, corte local, ID do
+   motorista). Saida digital -> GPIO com interrupcao.
+
+   RXB6/SYN480R  ESP32 DevKit V1    OBSERVACAO
+   ------------  ----------------   ------------------------------------------
+   VCC      -->  5V (por causa do com VIN) ou 3V3 conforme modulo
+   GND      -->  GND
+   DATA     -->  GPIO34             (input-only, bom para leitura digital)
+                                    OU GPIO4 se preferir pino interrompivel
+   ANT      -->  fio de ~17cm       Antena de 1/4 de onda
+
+   O receptor 433 costuma ter 2 pinos de dados (DATA/DATA). Um serve.
+   Obs.: o RF 433 nao tem criptografia. Aqui ele e usado apenas como gatilho
+   local, NAO como autenticacao do servidor.
+
+  ------------------------------------------------------------------------------
+  4.5  Modulo rele 12V (corte da ignicao) - com optoacoplador
+  ------------------------------------------------------------------------------
+   ACIONAMENTO PELO ESP32 (GPIO -> PC817 -> 2N2222 -> bobina do rele).
+   Assim o GPIO (3.3V) nao ve a bobina de 12V.
+
+   LIGACAO DO LADO DE CONTROLE (baixa tensao):
+   ESP32 GPIO23 ---[R 1k]--- PC817 pino 1 (anodo)
+   PC817 pino 2 (catodo) --- GND ESP32
+   PC817 pino 4 (coletor) --- [R 10k p/ 12V] --- Base 2N2222
+   PC817 pino 3 (emissor) --- GND
+   2N2222 emissor --- GND
+   2N2222 coletor --- Bobina do rele (terminal A)
+   1N4007: catodo na bobina A (+) e anodo na bobina B (-)  (roda-livre)
+   Bobina terminal B -> +12V (apos fusivel)
+
+   LADO DE POTENCIA (corte da ignicao):
+   - Contato NA (Normal Aberto) do rele em SERIE com o fio da ignicao.
+   - Quando o ESP32 NAO aciona: contato FECHADO -> carro liga (normal).
+   - Quando o comando "block" chega: contato ABRE -> ignicao cortada.
+   IMPORTANTE: escolha o contato conforme o relê. O firmware assume que o
+   estado BLOQUEADO = rele energizado = contato NA aberto. Se o seu relê for
+   o contrario, ajuste IGNITION_ACTIVE_HIGH em config.h.
+
+   GPIO usada no firmware: GPIO23 (RELAY_PIN). Veja firmware/src/config.h.
+
+   SEGURANCA: nunca teste em um carro real sem um fusivel dedicado no fio da
+   ignicao e sem confirmar a fiação. Prefira bancada: uma lampada no lugar
+   do "corte" para visualizar o acionamento.
+
+  ------------------------------------------------------------------------------
+  4.6  Protecao e alimentacao (12V)
+  ------------------------------------------------------------------------------
+   12V (bateria) --> [FUSIVEL 2A] --> [TVS SMBJ36CA p/ GND] --> +12V protegido
+                                                                   |
+      +-----------------------------+------------------------------+
+      |                             |                              |
+      v                             v                              v
+   [BUCK -> 5V]                 [RELE bobina]                [divisor ADC]
+                                                                   |
+                                                    100k em serie + 22k p/ GND
+                                                    (ponto medio -> GPIO36/VP)
+
+   FUSIVEL: 2A cobre a logica (buck + relê). Use um fusivel SEPARADO (ex.: 5A)
+   no fio da ignicao (lado de potencia do relê).
+
+   TVS SMBJ36CA: clamp ~36V entre +12V e GND (protege contra transientes do
+   alternador/picos de ignicao).
+
+   DIVISOR DA BATERIA (leitura 11.1V..12.6V no ADC do ESP32):
+     Vbat --[100k]--+--[22k]-- GND
+                    |
+                    +--> GPIO36 (VP)
+     Tensao no ADC = Vbat * 22k / (100k+22k)  -> ~1.9V a 2.3V (dentro do ADC
+     de 3.3V do ESP32). ADC_ATTENUATION_11DB no firmware.
+     Use resistores de 1% para leitura confiavel.
+
+   BMS 3S (B+/B-/B1/B2 p/ celulas; P+/P- p/ saída e carga):
+   - B1, B2: pontos intermediarios das 3 celulas (balanceamento).
+   - P+ -> +12V do sistema; P- -> GND do sistema.
+   - Carregador entra em P+/P- (a carga passa pelo BMS, que protege contra
+     sobrecarga/descarga). NUNCA carregue as celulas direto sem o BMS.
+
+
+================================================================================
+  5. TABELA RESUMO DE PINOS DO FIRMWARE (config.h)
+================================================================================
+
+  MACRO (config.h)        GPIO   DESCRICAO
+  ----------------------  ----   --------------------------------------------
+  GPS_RX_PIN              16     UART2 RX  <- TX do NEO-M8N
+  GPS_TX_PIN              17     UART2 TX  -> RX do NEO-M8N
+  LTE_RX_PIN              25     UART1 RX  <- TXD do SIM7600
+  LTE_TX_PIN              26     UART1 TX  -> RXD do SIM7600
+  LTE_PWRKEY_PIN          27     Pulso de ligar o modem
+  RELAY_PIN               23     Driver do relê (via PC817/2N2222)
+  RF_DATA_PIN             34     Dados do receptor 433 MHz (input-only)
+  BATTERY_ADC_PIN         36     Divisor de tensao da bateria (VP)
+  STATUS_LED_PIN          2      LED azul onboard (status)
+  UART0 (USB)             1/3    Debug/serial monitor
+
+  Pinos 34, 35, 36, 39 sao INPUT-ONLY (nao tem pull-up/pull-down interno).
+
+
+================================================================================
+  6. CHECKLIST DE MONTAGEM
+================================================================================
+
+  [ ] Bateria 3S montada nas celulas corretas (B1/B2 no meio das celulas)
+  [ ] BMS 3S ligado (P+ no +12V, P- no GND do sistema)
+  [ ] Fusivel 2A na linha +12V; fusivel de potencia no fio da ignicao
+  [ ] TVS SMBJ36CA entre +12V e GND
+  [ ] Buck ajustado para EXATAMENTE 5.0V (medir com multimetro ANTES de
+      ligar o ESP32!)
+  [ ] ESP32 VIN no 5V do buck; GND comum de todos os modulos
+  [ ] GPS NEO-M8N: VCC, GND, TX->GPIO16, RX->GPIO17
+  [ ] SIM7600: GND comum, VBAT no 5V (com capacitor), TXD->GPIO25, RXD->GPIO26,
+      PWRKEY->GPIO27
+  [ ] RF 433: VCC, GND, DATA->GPIO34 (com antena ~17cm)
+  [ ] Relê: GPIO23 -> R1k -> PC817 -> R10k -> 2N2222 -> bobina + 1N4007
+  [ ] Divisor 100k/22k entre +12V e GND, ponto medio no GPIO36
+  [ ] LED onboard (GPIO2) piscando = firmware rodando
+  [ ] Medir tensao no divisor e conferir ~2V (se der 3.3V, resistencia errada)
+
+  DEPOIS DE LIGAR:
+  [ ] `pio device monitor -b 115200` deve mostrar o banner
+      "SECURITAS - rastreador ESP32"
+  [ ] Obter as credenciais: POST /v1/vehicles/:id/device (ver secao 7) e
+      colar em firmware/src/secrets.h (DEVICE_ID / API_KEY)
+  [ ] Configurar WIFI_SSID / WIFI_PASS (ou os dados da operadora para o 4G)
+  [ ] Compilar e gravar: `pio run -t upload`
+  [ ] Conferir no painel web (http://localhost:3000/) que o veiculo aparece
+
+
+================================================================================
+  7. COMO OBTER AS CREDENCIAIS DO DISPOSITIVO
+================================================================================
+
+  1. No app/painel, crie um veiculo.
+  2. Chame (com o token do usuario logado):
+       POST /v1/vehicles/:id/device
+     A resposta traz:
+       { "device": { "deviceId": "vt_xxxxxxxxxxxxxxxx",
+                     "apiKey": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" } }
+  3. Copie esses dois valores para firmware/src/secrets.h:
+       #define DEVICE_ID "vt_xxxxxxxxxxxxxxxx"
+       #define API_KEY   "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+  OBS.: criar um "device" via API vincula um RASTREADOR REAL ao veiculo. Nao
+  confundir com a simulacao (device com model='server-sim').
+  Para voltar a simular depois, e preciso remover/desvincular esse device.
+
+
+================================================================================
+  8. NOTAS FINAIS
+================================================================================
+
+  - Todos os modulos compartilham o MESMO GND (terra comum). Esquecer isso e a
+    causa #1 de "o GPS nao responde".
+  - O ESP32 e 3.3V. Modulos de 5V (GPS/SIM7600 breakout) devem ter o nivel
+    logico compativel. Se seu modulo usar 5V no TX, use um divisor no RX do ESP32.
+  - Nao alimente o SIM7600 pelo 3.3V do ESP32 (corrente insuficiente nos picos).
+  - Mantenha fios de antena longe dos fios de potencia.
+  - Teste toda a logica na bancada com uma fonte de bancada (12V limitada em
+    1A) ANTES de ligar na bateria.
+  - O protocolo HTTP exato que o firmware deve seguir esta em
+    backend/API_ESTRUTURA.txt, secao 7 (Endpoints do Hardware).
+  - API_BASE_URL (em firmware/src/secrets.h) deve ser o IP da maquina que roda
+    o backend. O firmware conhece ate TRES enderecos (API_BASE_URL, _2, _3) e
+    usa o primeiro que responder, entao pode listar o IP da rede Wi-Fi e o da
+    rede cabeada do servidor. Na rede da faculdade o roteador ISOLA os
+    clientes Wi-Fi entre si: o ESP32 nao alcanca o IP Wi-Fi do servidor e
+    chega nele pelo IP de rede cabeada.
+  - O firmware envia um "heartbeat" a cada 60s em GET /v1/hardware/:id/status.
+    Esse heartbeat atualiza devices.lastSeen no Firestore e mantem o
+    rastreador marcado como "online" no painel mesmo sem GPS conectado.
+  - Gravar o firmware: ver hardware/README.txt (passo a passo do PlatformIO).
+
+================================================================================
+  FIM DO DOCUMENTO
+================================================================================

@@ -5,21 +5,32 @@ import android.view.MotionEvent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -43,6 +54,13 @@ import org.osmdroid.views.overlay.Marker
 private const val DEFAULT_ZOOM = 16.0
 private const val FOCUS_ZOOM = 17.0
 
+/**
+ * Onde a câmera do mapa focaliza quando o usuário pede para localizar:
+ * a posição do VEÍCULO (telemetria) ou a do CELULAR (GPS do aparelho).
+ * Escolhido na hora pelo usuário pela caixa de opção sobreposta ao mapa.
+ */
+enum class MapFocusTarget { VEHICLE, PHONE }
+
 // Tamanho mínimo (em graus) do enquadramento inicial. Sem esse piso, dois
 // pontos praticamente coincidentes geram um BoundingBox degenerado; o osmdroid
 // calcula um zoom "infinito" e entra em loop infinito em
@@ -60,12 +78,16 @@ private const val MIN_FIT_SPAN_DEG = 0.004
  *
  * Comportamento de câmera:
  *  - na primeira exibição, enquadra os dois marcadores;
- *  - depois disso, se o usuário ainda não interagiu, apenas centraliza no
- *    veículo MANTENDO o zoom escolhido (não "puxa" o zoom de volta);
+ *  - depois disso, a câmera acompanha o alvo escolhido na caixa de opção do
+ *    mapa (VEÍCULO por padrão ou CELULAR), MANTENDO o zoom escolhido
+ *    (não "puxa" o zoom de volta);
  *  - assim que o usuário arrasta/pinça o mapa, o acompanhamento é desligado
- *    (o botão "centralizar" religa e volta a aproximar no veículo).
+ *    (o botão "centralizar" religa e volta a aproximar no alvo escolhido).
  */
-private class TrackingMapController(private val appContext: Context) {
+private class TrackingMapController(
+    private val appContext: Context,
+    initialFocus: MapFocusTarget = MapFocusTarget.VEHICLE
+) {
 
     var map: MapView? = null
         private set
@@ -73,8 +95,15 @@ private class TrackingMapController(private val appContext: Context) {
     private var vehicleMarker: Marker? = null
     private var phoneMarker: Marker? = null
 
-    /** Quando true, a câmera acompanha o veículo (sem mexer no zoom). */
-    private var followVehicle = true
+    /** Foco escolhido pelo usuário (veículo ou celular). */
+    private var chosenFocus: MapFocusTarget = initialFocus
+
+    /**
+     * Alvo que a câmera segue (sem mexer no zoom). `null` = o usuário arrastou
+     * o mapa e assumiu o controle; o botão "centralizar" volta a seguir o
+     * [chosenFocus].
+     */
+    private var following: MapFocusTarget? = initialFocus
 
     /** Garante que o enquadramento inicial (veículo + celular) ocorra só 1x. */
     private var initialViewDone = false
@@ -91,7 +120,7 @@ private class TrackingMapController(private val appContext: Context) {
             // automático; retornar false deixa o MapView tratar o toque.
             mapView.setOnTouchListener { _, event ->
                 when (event.actionMasked) {
-                    MotionEvent.ACTION_MOVE, MotionEvent.ACTION_POINTER_DOWN -> followVehicle = false
+                    MotionEvent.ACTION_MOVE, MotionEvent.ACTION_POINTER_DOWN -> following = null
                 }
                 false
             }
@@ -107,13 +136,33 @@ private class TrackingMapController(private val appContext: Context) {
         map?.controller?.zoomOut()
     }
 
-    /** Religa o acompanhamento e aproxima a câmera no veículo. */
-    fun recenterOnVehicle() {
-        followVehicle = true
+    /** Religa o controle manual e aproxima a câmera no alvo escolhido. */
+    fun recenterOnFocus() {
+        following = chosenFocus
         val mapView = map ?: return
-        val target = vehicleMarker?.position ?: return
+        val target = markerFor(chosenFocus)?.position ?: return
         mapView.controller.animateTo(target, FOCUS_ZOOM, 800L, null)
     }
+
+    /**
+     * Troca o foco do mapa (veículo ↔ celular) e centraliza no novo alvo.
+     * Idempotente: só age quando o foco realmente muda, porque é chamado a
+     * cada recomposição — sem isso o mapa "puxaria" a câmera de volta mesmo
+     * quando o usuário tivesse arrastado.
+     */
+    fun setFocusTarget(target: MapFocusTarget) {
+        if (target == chosenFocus) return
+        chosenFocus = target
+        following = target
+        // O usuário já escolheu onde focalizar: não enquadra mais os dois.
+        initialViewDone = true
+        val mapView = map ?: return
+        val point = markerFor(target)?.position ?: return
+        mapView.controller.animateTo(point, FOCUS_ZOOM, 800L, null)
+    }
+
+    private fun markerFor(target: MapFocusTarget): Marker? =
+        if (target == MapFocusTarget.VEHICLE) vehicleMarker else phoneMarker
 
     /**
      * Move o marcador do VEÍCULO para a posição da telemetria.
@@ -138,7 +187,7 @@ private class TrackingMapController(private val appContext: Context) {
         existingMarker.position = geoPoint
         mapView.invalidate()
 
-        if (!followVehicle) return
+        if (following != MapFocusTarget.VEHICLE) return
 
         if (phoneMarker?.position != null && !initialViewDone) {
             fitToBothMarkers(animated = animate)
@@ -178,9 +227,15 @@ private class TrackingMapController(private val appContext: Context) {
         mapView.invalidate()
 
         // Enquadra veículo + celular apenas quando o celular surge no mapa.
-        if (followVehicle && !initialViewDone && vehicleMarker?.position != null) {
+        if (following != null && !initialViewDone && vehicleMarker?.position != null) {
             fitToBothMarkers(animated = true)
             initialViewDone = true
+            return
+        }
+
+        // Foco no celular: a câmera acompanha a posição do aparelho.
+        if (following == MapFocusTarget.PHONE) {
+            mapView.controller.animateTo(geoPoint, mapView.zoomLevelDouble, 400L, null)
         }
     }
 
@@ -216,7 +271,7 @@ private class TrackingMapController(private val appContext: Context) {
         map = null
         vehicleMarker = null
         phoneMarker = null
-        followVehicle = true
+        following = chosenFocus
         initialViewDone = false
     }
 }
@@ -241,6 +296,64 @@ private fun MapControlButton(
 }
 
 /**
+ * Caixa de opção do mapa: o usuário escolhe, na hora de localizar, se a
+ * câmera focaliza a posição do VEÍCULO ou a do CELULAR.
+ */
+@Composable
+private fun FocusTargetSelector(
+    current: MapFocusTarget,
+    onSelected: (MapFocusTarget) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val isVehicle = current == MapFocusTarget.VEHICLE
+
+    Box(modifier = modifier) {
+        OutlinedButton(
+            onClick = { expanded = true },
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+            colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+            )
+        ) {
+            Icon(
+                imageVector = if (isVehicle) Icons.Default.DirectionsCar else Icons.Default.PhoneAndroid,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = if (isVehicle) "Veículo" else "Celular",
+                style = MaterialTheme.typography.labelMedium
+            )
+            Icon(
+                imageVector = Icons.Default.ArrowDropDown,
+                contentDescription = "Escolher onde focalizar o mapa"
+            )
+        }
+
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("Localização do veículo") },
+                leadingIcon = { Icon(Icons.Default.DirectionsCar, contentDescription = null) },
+                onClick = {
+                    expanded = false
+                    onSelected(MapFocusTarget.VEHICLE)
+                }
+            )
+            DropdownMenuItem(
+                text = { Text("Localização do celular") },
+                leadingIcon = { Icon(Icons.Default.PhoneAndroid, contentDescription = null) },
+                onClick = {
+                    expanded = false
+                    onSelected(MapFocusTarget.PHONE)
+                }
+            )
+        }
+    }
+}
+
+/**
  * Superfície do mapa com os controles sobrepostos (tela cheia, zoom e
  * centralizar). Usada tanto no cartão quanto no modo tela cheia.
  */
@@ -251,12 +364,15 @@ private fun MapSurface(
     animate: Boolean,
     phoneLatitude: Double,
     phoneLongitude: Double,
+    focusTarget: MapFocusTarget,
+    onFocusTargetChange: (MapFocusTarget) -> Unit,
     isFullscreen: Boolean,
     onToggleFullscreen: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val controller = remember { TrackingMapController(context.applicationContext) }
+    // O foco escolhido nasce junto com o mapa (a tela cheia cria o seu).
+    val controller = remember { TrackingMapController(context.applicationContext, focusTarget) }
 
     DisposableEffect(controller) {
         onDispose { controller.onDetach() }
@@ -272,9 +388,19 @@ private fun MapSurface(
             },
             modifier = Modifier.fillMaxSize(),
             update = {
+                controller.setFocusTarget(focusTarget)
                 controller.updateVehiclePosition(latitude, longitude, animate)
                 controller.updatePhonePosition(phoneLatitude, phoneLongitude)
             }
+        )
+
+        // Caixa de opção: onde o mapa deve focalizar (veículo ↔ celular).
+        FocusTargetSelector(
+            current = focusTarget,
+            onSelected = onFocusTargetChange,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(8.dp)
         )
 
         // Controles no canto superior direito.
@@ -308,8 +434,9 @@ private fun MapSurface(
 
             MapControlButton(
                 icon = Icons.Default.MyLocation,
-                contentDescription = "Centralizar no veículo",
-                onClick = { controller.recenterOnVehicle() },
+                contentDescription = if (focusTarget == MapFocusTarget.VEHICLE)
+                    "Centralizar no veículo" else "Centralizar no celular",
+                onClick = { controller.recenterOnFocus() },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(8.dp)
@@ -325,6 +452,8 @@ fun TrackingMap(
     animate: Boolean,
     phoneLatitude: Double = 0.0,
     phoneLongitude: Double = 0.0,
+    focusTarget: MapFocusTarget = MapFocusTarget.VEHICLE,
+    onFocusTargetChange: (MapFocusTarget) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var fullscreen by remember { mutableStateOf(false) }
@@ -335,6 +464,8 @@ fun TrackingMap(
         animate = animate,
         phoneLatitude = phoneLatitude,
         phoneLongitude = phoneLongitude,
+        focusTarget = focusTarget,
+        onFocusTargetChange = onFocusTargetChange,
         isFullscreen = false,
         onToggleFullscreen = { fullscreen = true },
         modifier = modifier
@@ -358,6 +489,8 @@ fun TrackingMap(
                     animate = animate,
                     phoneLatitude = phoneLatitude,
                     phoneLongitude = phoneLongitude,
+                    focusTarget = focusTarget,
+                    onFocusTargetChange = onFocusTargetChange,
                     isFullscreen = true,
                     onToggleFullscreen = { fullscreen = false },
                     modifier = Modifier.fillMaxSize()

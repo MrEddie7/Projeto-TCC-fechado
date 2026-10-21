@@ -13,6 +13,7 @@
   5. Autenticação (app e hardware)
   6. Endpoints do app (método, path, auth, body, resposta)
   7. Endpoints do hardware (protocolo do firmware)
+  7.1 Firmware do ESP32 (hardware/firmware)
   8. Tempo real via SSE
   9. Painel web do administrador (/v1/admin)
  10. Ligação com o app Android (ApiLinkScreen + FirebaseDataSource)
@@ -345,11 +346,69 @@
 
  GET /v1/hardware/:deviceId/status
    headers: x-device-id, x-api-key
-   usado no BOOT do firmware (valida credenciais).
+   usado no BOOT do firmware (valida credenciais) e como HEARTBEAT.
    resp 200: { deviceId, registered:true,
                vehicle:{id,plate,model,isBlocked} | null,
-               pendingCommands: <n>, serverTime }
+               pendingCommands: <n>, lastSeen, serverTime }
    resp 403 se credenciais erradas.
+   - Esta rota ATUALIZA devices.lastSeen no Firestore: e ela que mantem o
+     rastreador marcado como "online" no painel mesmo quando o veiculo esta
+     parado (ou quando o modulo GPS ainda nao fixou posicao e, portanto,
+     ainda nao ha telemetria para enviar).
+
+
+================================================================================
+ 7.1 FIRMWARE DO ESP32 (hardware/firmware)
+================================================================================
+ Codigo-fonte: hardware/firmware (PlatformIO / Arduino).
+ Pinagem, BOM e fiacao: hardware/LIGACOES_DE_PORTA.txt
+ Passo a passo de gravacao: hardware/README.txt
+
+ Fluxo do firmware contra esta API:
+
+   BOOT
+     GET /v1/hardware/:id/status            -> valida credenciais e sincroniza
+                                                o rele com o isBlocked do veiculo
+   A CADA 10s (TELEMETRY_INTERVAL_MS)
+     POST /v1/hardware/telemetry            -> so envia se o GPS tiver fix
+   A CADA 15s (COMMANDS_INTERVAL_MS)
+     GET /v1/hardware/:id/commands?status=pending
+     POST /v1/hardware/:id/commands/:id/ack -> confirma block/unblock
+   A CADA 60s (HEARTBEAT_INTERVAL_MS)
+     GET /v1/hardware/:id/status            -> mantem lastSeen atualizado
+
+ Transporte: Wi-Fi (preferencial) ou 4G (SIM7600 via TinyGSM) como fallback.
+ As duas rotas usam exatamente o mesmo protocolo (x-device-id / x-api-key);
+ o firmware apenas troca o `Client*` de rede usado pelo cliente HTTP.
+
+ O cliente HTTP do firmware (hardware/firmware/src/api_client.cpp) e um
+ HTTP/1.1 escrito a mao sobre `Client*`, e nao a classe HTTPClient do core
+ do Arduino: o HTTPClient do ESP32 aceita apenas `WiFiClient&`, e o 4G usa
+ o `TinyGsmClient`. Com o cliente proprio, Wi-Fi e 4G usam o MESMO codigo
+ (inclusive HTTPS, via WiFiClientSecure com setInsecure).
+
+ O firmware conhece ate DUAS redes Wi-Fi (principal e reserva) e ate TRES
+ enderecos da API: se a rede principal nao responder ele tenta a reserva, e
+ para a API usa o primeiro endereco que responder. Assim o rastreador
+ continua funcionando quando o IP do servidor muda de rede.
+
+ Observacao sobre a rede da faculdade: o roteador isola os clientes Wi-Fi
+ entre si, entao o ESP32 (no Wi-Fi) nao alcanca o IP Wi-Fi do servidor; ele
+ chega pelo IP de rede cabeada do servidor. Por isso existem tres
+ enderecos candidatos em secrets.h.
+
+ Credenciais: obtidas com POST /v1/vehicles/:id/device e gravadas em
+ hardware/firmware/src/secrets.h (NAO versionado; veja secrets.example.h).
+
+ Sem GPS conectado o firmware nao envia telemetria (nao inventaria
+ coordenadas), mas continua emitindo o heartbeat de 60s - por isso o
+ rastreador aparece como "online" no painel mesmo em bancada, sem nenhum
+ modulo ligado.
+
+ No painel admin, cada veiculo expoe dois indicadores:
+   online     -> chegou telemetria de GPS nos ultimos minutos
+   connected  -> o rastreador falou com a API (heartbeat) nos ultimos minutos
+ O badge "online" do painel considera os dois (isLive(v) no index.html).
 
 
 ================================================================================
@@ -437,6 +496,29 @@
    resp 200: { import:{ storage:'firestore', accounts, cloudVehicles, devices,
                         importedAt } }
    Resumo do que existe na nuvem (o Firestore JÁ é o banco da API).
+
+ POST /v1/admin/vehicles/:id/position  🔒
+   body: { latitude, longitude, speed? }
+   resp 200: { vehicle:{...}, point:{ latitude, longitude, speed, timestamp } }
+   Posicionamento MANUAL do veículo: arrastar o marcador no mapa do painel.
+   Atualiza, de uma vez:
+     - Firestore `vehicles` (latitude, longitude, speed, last_update);
+     - RTDB `telemetry/{vehicleId}` (espelho da posição);
+     - evento SSE `telemetry` (app e painel atualizam na hora);
+     - carimbo em RTDB `sim_control/{vehicleId}` (updatedAt).
+   O carimbo é o que faz o simulador (backend/src/hardware-simulator.js)
+   reancorar a rota do veículo simulado no ponto arrastado, em vez de
+   continuar seguindo o trajeto original.
+   400 se latitude/longitude forem inválidos; 404 se o veículo não existe.
+
+ POST /v1/admin/firebase/sync  🔒
+   resp 200: { users:{ synced, errors, total }, devices:{ count, errors } }
+   Botão "Sincronizar Firebase" do painel. Faz duas cópias:
+     - Firebase Auth  -> Firestore `users` (cria/atualiza o documento de cada
+       conta do Auth com email, name, firebaseUid, etc.);
+     - Firestore `mobile_devices` -> RTDB `mobile_devices` (replica os
+       celulares registrados pelo app para o Realtime Database).
+   Não apaga nada: apenas garante que os dois lados tenham os mesmos dados.
 
  ── Logs de requisição (buffer em memória) ─────────────────────────────────
  GET /v1/admin/logs?since=&limit=  🔒
@@ -541,9 +623,15 @@
    Subir a API + um simulador por veículo:
      npm run api
 
-   O ./api.sh lê a frota do FIRESTORE via `node src/list-devices.js` (exclui
-   os devices virtuais server-sim), e sobe um processo node por device, cada
-   um com PID e log próprios em .run/sim-<n>.pid.
+   O ./api.sh lê a frota do FIRESTORE via `node src/list-devices.js`, que
+   devolve SOMENTE os devices virtuais (model='server-sim'), e sobe um
+   processo node por device, cada um com PID e log próprios em
+   .run/sim-<n>.pid.
+
+   Devices com model vazio NAO são simulados de propósito: eles são
+   reservados para o rastreador de hardware real (ESP32). Se o simulador
+   emulasse esse device, ele brigaria com o ESP32 de verdade, que grava
+   telemetria com o mesmo deviceId.
 
    Variáveis úteis:
      SIM_FLEET=2          limita quantos veículos simular

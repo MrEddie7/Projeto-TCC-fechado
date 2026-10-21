@@ -103,7 +103,14 @@ Protegidos para o rastreador GPS:
 
 Há ainda rotas administrativas (`/v1/admin/*`) para visão geral, consulta de
 qualquer veículo da frota, simulação, logs e diagnóstico. Elas exigem
-autenticação e são consumidas pelo painel web.
+autenticação e são consumidas pelo painel web. Destaques:
+
+- `POST /v1/admin/vehicles/:id/position` — posiciona o veículo manualmente
+  (arrastar o marcador no mapa do painel). Atualiza o Firestore, o Realtime
+  Database, o SSE e o carimbo que faz o simulador reancorar a rota.
+- `POST /v1/admin/firebase/sync` — botão "Sincronizar Firebase": replica as
+  contas do Firebase Auth para o Firestore e os celulares registrados
+  (`mobile_devices`) do Firestore para o Realtime Database.
 
 5. TELEMETRIA, COMANDOS E TEMPO REAL
 --------------------------------------------------------------------------------
@@ -131,5 +138,51 @@ A API inicia, por padrão, em `http://localhost:3000`. Comandos adicionais:
 Para subir a API é necessário o Firebase: coloque a chave da conta de serviço em
 `backend/firebase-service-account.json` e preencha o `.env` (use `.env.example`
 como referência).
+
+7. FIRMWARE DO RASTREADOR (ESP32)
+--------------------------------------------------------------------------------
+O firmware do rastreador fica em `hardware/firmware` (PlatformIO/Arduino) e está
+documentado em `hardware/LIGACOES_DE_PORTA.txt` (pinagem, BOM e fiacao) e
+`hardware/README.txt` (gravação e diagnóstico).
+
+O hardware previsto é um ESP32 DevKit V1 com:
+
+- GPS u-blox NEO-M8N (UART2, pinos 16/17);
+- modem 4G SIM7600G-H (UART1, pinos 25/26, PWRKEY no 27) como alternativa ao
+  Wi-Fi;
+- receptor RF 433 MHz (RXB6/SYN480R) no GPIO 34;
+- relê de corte da ignição (PC817 + 2N2222 + 1N4007) no GPIO 23;
+- leitura de bateria do pack 3S por divisor de tensão no GPIO 36;
+- LED de status no GPIO 2.
+
+O firmware conversa com a API usando exatamente o protocolo documentado em
+`backend/API_ESTRUTURA.txt` (seção 7): cabeçalhos `x-device-id` e `x-api-key` em
+todas as chamadas. Ele valida as credenciais no boot, envia telemetria a cada
+10 s, consulta os comandos de bloqueio a cada 15 s e emite um heartbeat a cada
+60 s — o heartbeat mantém o rastreador marcado como "online" no painel mesmo
+quando o GPS ainda não fixou posição (bancada, sem módulos ligados).
+
+As credenciais (`DEVICE_ID` e `API_KEY`) são geradas pela API em
+`POST /v1/vehicles/:id/device` e gravadas em `hardware/firmware/src/secrets.h`,
+que não é versionado (use `secrets.example.h` como modelo).
+
+Para sobreviver à rede instável da faculdade, o firmware conhece duas redes
+Wi-Fi (principal e reserva) e até três endereços da API: ele cai na segunda
+rede quando a primeira não responde e usa o primeiro endereço da API que
+responder, mantendo-o enquanto ele funcionar. O cliente HTTP foi escrito
+sobre `Client*` (em vez da classe `HTTPClient` do core do Arduino, que só
+aceita `WiFiClient&`), para que Wi-Fi e 4G compartilhem exatamente o mesmo
+código.
+
+8. PAINEL WEB DO ADMINISTRADOR
+--------------------------------------------------------------------------------
+Servido pela própria API na raiz (`/`), em HTML e JavaScript puro. Faz login
+com o Firebase Authentication (REST Identity Toolkit) e usa o ID Token como
+Bearer em todas as chamadas administrativas.
+
+Além da visão geral da frota, dos logs e do diagnóstico, o painel permite
+posicionar o veículo manualmente arrastando o marcador no mapa e sincronizar o
+Firebase (botão "Sincronizar Firebase"), que replica as contas do Auth para o
+Firestore e os celulares registrados para o Realtime Database.
 
 ================================================================================

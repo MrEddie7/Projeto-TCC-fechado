@@ -19,6 +19,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.tcc.veiculotracker.ui.components.MapFocusTarget
 import com.tcc.veiculotracker.ui.components.TrackingMap
 import com.tcc.veiculotracker.ui.theme.Active
 import com.tcc.veiculotracker.ui.theme.Blocked
@@ -189,6 +190,8 @@ fun TrackingScreen(
                         animate = state.isTracking,
                         phoneLatitude = if (state.isPhoneVisible) state.phoneLatitude else 0.0,
                         phoneLongitude = if (state.isPhoneVisible) state.phoneLongitude else 0.0,
+                        focusTarget = state.mapFocusTarget,
+                        onFocusTargetChange = viewModel::setMapFocusTarget,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(240.dp)

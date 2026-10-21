@@ -1,0 +1,14 @@
+# ── PlatformIO ─────────────────────────────────────────────────────────────
+firmware/.pio/
+firmware/.vscode/
+firmware/pioenvs/
+firmware/.piolibdeps/
+
+# Credenciais do dispositivo: NUNCA versionar.
+firmware/src/secrets.h
+
+# ── Sistema ────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*~

@@ -58,8 +58,14 @@ class FirebaseDataSource {
     // ── Cloud Firestore: Vehicles ───────────────────────────────────────────
 
     suspend fun syncVehicle(vehicle: VehicleModel) {
+        // Fallback sem backend: um veículo novo chega aqui com id=0. Como cada
+        // usuário pode ter VÁRIOS veículos, gravar todos no documento "0"
+        // faria o último sobrescrever os anteriores — gera id único no mesmo
+        // formato da API (Date.now()*100 + aleatório) quando o app não tem um.
+        val id = if (vehicle.id > 0) vehicle.id
+                 else System.currentTimeMillis() * 100 + (0..99).random()
         val data = buildMap<String, Any> {
-            put("id",          vehicle.id)
+            put("id",          id)
             put("userId",      vehicle.userId)
             put("plate",       vehicle.plate)
             put("model",       vehicle.model)
@@ -76,7 +82,7 @@ class FirebaseDataSource {
             currentAccountEmail?.let { put("ownerEmail", it) }
         }
         firestore.collection("vehicles")
-            .document(vehicle.id.toString())
+            .document(id.toString())
             .set(data)
             .await()
     }

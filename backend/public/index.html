@@ -434,6 +434,13 @@ function esc(v) {
   return String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
+// "No ar" = o veículo mandou telemetria de GPS (online) OU o rastreador
+// falou com a API pelo heartbeat (connected). Assim o ESP32 aparece ativo
+// mesmo ainda sem o módulo GPS ligado.
+function isLive(v) {
+  return !!(v && (v.online || v.connected));
+}
+
 function setChip(el, cls, text) {
   el.className = 'chip' + (cls ? ' ' + cls : '');
   el.lastElementChild.textContent = text;
@@ -452,7 +459,8 @@ function renderOverview(o) {
   const totalVehicles = (c.vehicles ?? 0) + (c.phoneVehicles ?? 0);
   $('stVehicles').textContent = totalVehicles || '—';
   $('stVehiclesSub').textContent =
-    `${c.onlineVehicles ?? 0} online · ${c.blockedVehicles ?? 0} bloqueados · ` +
+    `${c.onlineVehicles ?? 0} online · ${c.connectedVehicles ?? 0} ativos · ` +
+    `${c.blockedVehicles ?? 0} bloqueados · ` +
     `${c.simulatedVehicles ?? 0} simulador · ${c.phoneVehicles ?? 0} só celular`;
   $('stDevices').textContent = c.devices ?? '—';
   $('stTelemetry').textContent = c.telemetryPoints ?? '—';
@@ -527,7 +535,7 @@ function renderUsers(users) {
           const badges = [
             isOnlyCloud
               ? '<span class="badge off">só na nuvem</span>'
-              : (v.online ? '<span class="badge on">online</span>' : '<span class="badge off">offline</span>'),
+              : (isLive(v) ? '<span class="badge on">online</span>' : '<span class="badge off">offline</span>'),
             v.isBlocked ? '<span class="badge blocked">bloqueado</span>' : '',
             isPhone ? '<span class="badge phone">📱 celular</span>' : '',
             !isOnlyCloud && (v.simulated
@@ -613,7 +621,7 @@ function renderRealTest(o) {
     rows.push(`
       <div class="rt-row">
         <b>  ${esc(r.vehicle.plate)} · veículo real</b>
-        <span class="rt-sub">${esc(r.vehicle.brand)} ${esc(r.vehicle.model)} · ${r.vehicle.online ? 'online' : 'offline'} · de ${esc(r.user.name)}</span>
+        <span class="rt-sub">${esc(r.vehicle.brand)} ${esc(r.vehicle.model)} · ${isLive(r.vehicle) ? 'online' : 'offline'} · de ${esc(r.user.name)}</span>
       </div>`);
   }
   box.innerHTML = rows.join('');
@@ -651,7 +659,7 @@ function renderPhoneVehicles(o) {
           <div class="sub">${esc(v.brand)} ${esc(v.model)} · ${esc(v.year)} · dono ${esc(owner.name || owner.email || '—')}</div>
         </div>
         <div class="sub" style="text-align:right">
-          ${v.online ? 'online' : 'offline'} · ${tracker}
+          ${isLive(v) ? 'online' : 'offline'} · ${tracker}
         </div>
       </div>`;
   }).join('') +
@@ -845,13 +853,13 @@ function renderFleet(vehicles) {
     const mk = L.circleMarker([lat, lng], {
       radius: v.id === state.vehicleId ? 9 : 6,
       color: '#fff', weight: v.id === state.vehicleId ? 2 : 1,
-      fillColor: color, fillOpacity: v.online ? .95 : .4,
+      fillColor: color, fillOpacity: isLive(v) ? .95 : .4,
     });
     const owner = v.owner ? v.owner.name : '—';
     mk.bindTooltip(`${esc(v.plate)} · ${esc(owner)}`, { direction: 'top' });
     mk.bindPopup(
       `<b>${esc(v.plate)}</b><br>${esc(v.brand)} ${esc(v.model)}<br>` +
-      `dono: ${esc(owner)}<br>${v.speed ?? 0} km/h · ${v.online ? 'online' : 'offline'}` +
+      `dono: ${esc(owner)}<br>${v.speed ?? 0} km/h · ${isLive(v) ? 'online' : 'offline'}` +
       `<br><span style="color:${color}">${v.simulated ? 'simulador' : 'teste real'}</span>`
     );
     mk.on('click', () => {

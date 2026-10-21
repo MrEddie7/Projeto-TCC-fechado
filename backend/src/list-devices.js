@@ -42,11 +42,14 @@ try {
 
   const vehicles = new Map(vehicleSnap.docs.map((d) => [String(d.data().id ?? d.id), d.data()]));
 
-  // Inclui rastreadores virtuais (model='server-sim'): eles representam
-  // veículos na frota simulada e DEVEM ser movimentados pelo simulador.
+  // Só os rastreadores VIRTUAIS (model='server-sim') podem ser emulados.
+  // Um device com model vazio é reservado para o rastreador de hardware real
+  // (ESP32): simular esse device brigaria com o ESP32 de verdade, que
+  // gravou o mesmo deviceId no Firestore.
   const rows = deviceSnap.docs
     .map((d) => ({ deviceId: d.id, ...d.data() }))
     .filter((d) => d.vehicleId != null)
+    .filter((d) => d.model === 'server-sim')
     .sort((a, b) => String(a.deviceId).localeCompare(String(b.deviceId)));
 
   const selected = limit > 0 ? rows.slice(0, limit) : rows;

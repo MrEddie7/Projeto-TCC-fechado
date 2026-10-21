@@ -120,6 +120,11 @@ function serializeVehicle(v, { device, telemetry }) {
     speed: num(v.speed),
     lastUpdate: num(v.lastUpdate),
     online: online(v.lastUpdate),
+    // O rastreador real manda um heartbeat a cada 60s mesmo sem GPS ligado.
+    // "connected" = o dispositivo falou com a API recentemente; "online" =
+    // chegou telemetria de GPS nos ultimos minutos.
+    connected: online(device?.lastSeen),
+    lastSeen: num(device?.lastSeen),
     createdAt: num(v.createdAt),
     simulation: getSimulationDecision(v, device),
     device,
@@ -291,6 +296,8 @@ export async function buildOverview() {
     realVehicles: vehicles.filter((v) => !v.simulated).length,
     blockedVehicles: vehicles.filter((v) => v.isBlocked).length,
     onlineVehicles: vehicles.filter((v) => v.online).length,
+    // Veículos cujo rastreador falou com a API (heartbeat) nos últimos minutos.
+    connectedVehicles: vehicles.filter((v) => v.connected).length,
     devices: rawDevices.length,
     simulatedDevices: rawDevices.filter((d) => d.model === 'server-sim').length,
     realDevices: rawDevices.filter((d) => d.model !== 'server-sim').length,
