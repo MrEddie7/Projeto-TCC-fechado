@@ -47,9 +47,12 @@ class SyncManager(
      * completo com um VehicleModel obtido de um Flow/observer sobrescreveria
      * esses campos com valores defasados — por isso só publicamos o que o app
      * realmente cria/edita (cadastro, edição cadastral e exclusão).
+     *
+     * `isNew = true` marca cadastro (o id é gerado). Edição preserva o id
+     * existente — inclusive o id 0, que é um veículo real com rastreador.
      */
-    suspend fun syncVehicle(vehicle: VehicleModel) {
-        runCatching { firebaseDataSource.syncVehicle(vehicle) }
+    suspend fun syncVehicle(vehicle: VehicleModel, isNew: Boolean = false) {
+        runCatching { firebaseDataSource.syncVehicle(vehicle, isNew) }
     }
 
     /**
@@ -105,12 +108,12 @@ class SyncManager(
 
     // ── Telemetria (Realtime Database) ────────────────────────────────────────
 
+    /**
+     * Le a posição publicada pela API/hardware. O app não escreve neste canal
+     * (é o canal do rastreador).
+     */
     fun listenTelemetry(vehicleId: Long): Flow<FirebaseDataSource.TelemetryData> =
         firebaseDataSource.listenTelemetry(vehicleId.toString())
-
-    suspend fun sendTelemetry(vehicleId: Long, data: FirebaseDataSource.TelemetryData) {
-        runCatching { firebaseDataSource.sendTelemetry(vehicleId.toString(), data) }
-    }
 
     // ── Comandos (Realtime Database) ──────────────────────────────────────────
 

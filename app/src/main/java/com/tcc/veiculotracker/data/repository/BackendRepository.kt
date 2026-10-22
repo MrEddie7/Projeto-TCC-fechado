@@ -134,6 +134,14 @@ class BackendRepository(
         return apiClient.deleteVehicle(vehicleId)
     }
 
+    /**
+     * Detalhe do veículo com o rastreador vinculado (se houver).
+     * `GET /v1/vehicles/:id` devolve { vehicle, device } — é o único caminho
+     * que diz ao app se o veículo tem GPS real e se o aparelho está online.
+     */
+    suspend fun getVehicleDetail(vehicleId: Long): Result<ApiClient.VehicleDetailDto> =
+        apiClient.getVehicleDetail(vehicleId)
+
     // ── Simulação ─────────────────────────────────────────────────────────────
 
     suspend fun getSimulationDecision(vehicleId: Long): Result<ApiClient.SimulationDecisionDto> =
@@ -170,9 +178,11 @@ class BackendRepository(
 
     // ── Mapeamento ─────────────────────────────────────────────────────────────
 
-    private fun ApiClient.VehicleDto.toModel() = VehicleModel(
+    /** Converte o DTO da API no modelo do app (mantém o ownerUid do dono). */
+    fun ApiClient.VehicleDto.toModel() = VehicleModel(
         id        = id,
         userId    = userId,
+        ownerUid  = ownerUid,
         plate     = plate,
         model     = model,
         brand     = brand,

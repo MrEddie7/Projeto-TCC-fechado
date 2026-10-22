@@ -44,8 +44,8 @@ class VehicleRepository(
                 return created
             }
         }
-        // Sem backend: grava direto no Firestore.
-        runCatching { syncManager.syncVehicle(vehicle) }
+        // Sem backend: grava direto no Firestore (id novo — é um cadastro).
+        runCatching { syncManager.syncVehicle(vehicle, isNew = true) }
         return vehicle
     }
 

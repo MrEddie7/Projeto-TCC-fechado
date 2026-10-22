@@ -57,13 +57,23 @@ class FirebaseDataSource {
 
     // ── Cloud Firestore: Vehicles ───────────────────────────────────────────
 
-    suspend fun syncVehicle(vehicle: VehicleModel) {
+    /**
+     * Publica um veículo no Firestore.
+     *
+     * `isNew` distingue cadastro de edição. Isso importa porque existe um
+     * veículo com id=0 (ECA-3567) que tem um rastreador vinculado: tratá-lo
+     * como "sem id" criava um documento novo (ECA-3567 duplicado) e o
+     * rastreador continuaria ligado ao documento original.
+     *
+     * A gravação é MERGE: o documento é compartilhado com a API (telemetria,
+     * bloqueio, `updatedAt`), e um `set` completo apagaria esses campos.
+     */
+    suspend fun syncVehicle(vehicle: VehicleModel, isNew: Boolean = false) {
         // Fallback sem backend: um veículo novo chega aqui com id=0. Como cada
         // usuário pode ter VÁRIOS veículos, gravar todos no documento "0"
         // faria o último sobrescrever os anteriores — gera id único no mesmo
         // formato da API (Date.now()*100 + aleatório) quando o app não tem um.
-        val id = if (vehicle.id > 0) vehicle.id
-                 else System.currentTimeMillis() * 100 + (0..99).random()
+        val id = if (isNew) System.currentTimeMillis() * 100 + (0..99).random() else vehicle.id
         val data = buildMap<String, Any> {
             put("id",          id)
             put("userId",      vehicle.userId)
@@ -73,17 +83,21 @@ class FirebaseDataSource {
             put("year",        vehicle.year)
             put("color",       vehicle.color)
             put("isBlocked",   vehicle.isBlocked)
-            put("latitude",    vehicle.latitude)
-            put("longitude",   vehicle.longitude)
-            put("speed",       vehicle.speed)
-            put("lastUpdate",  vehicle.lastUpdate)
-            put("createdAt",   vehicle.createdAt)
             currentAccountUid?.let   { put("ownerUid",   it) }
             currentAccountEmail?.let { put("ownerEmail", it) }
+            // Posição e carimbo de tempo são da API/telemetria: em edição não
+            // podem ser regravados com valores defasados do app.
+            if (isNew) {
+                put("latitude",    vehicle.latitude)
+                put("longitude",   vehicle.longitude)
+                put("speed",       vehicle.speed)
+                put("lastUpdate",  vehicle.lastUpdate)
+                put("createdAt",   vehicle.createdAt)
+            }
         }
         firestore.collection("vehicles")
             .document(id.toString())
-            .set(data)
+            .set(data, com.google.firebase.firestore.SetOptions.merge())
             .await()
     }
 
@@ -122,7 +136,14 @@ class FirebaseDataSource {
 
     private fun vehicleFromMap(docId: String, data: Map<String, Any>): VehicleModel = VehicleModel(
         id         = (data["id"] as? Number)?.toLong() ?: docId.toLongOrNull() ?: 0L,
-        userId     = (data["userId"] as? Number)?.toLong() ?: 0L,
+        userId     = (data["userId"] as? Number)?.toLong()
+            // Veículos criados pela API guardam o UID em string: converte para
+            // o id numérico legado (hash do UID), como no AuthRepository.
+            ?: (data["ownerUid"] as? String)?.let { uid ->
+                val h = uid.hashCode().toLong(); if (h < 0) -h else h
+            }
+            ?: 0L,
+        ownerUid   = data["ownerUid"] as? String,
         plate      = data["plate"] as? String ?: "",
         model      = data["model"] as? String ?: "",
         brand      = data["brand"] as? String ?: "",
@@ -210,6 +231,13 @@ class FirebaseDataSource {
         val timestamp: Long   = System.currentTimeMillis()
     )
 
+    /**
+     * Escuta a posição do veículo publicada pela API/hardware.
+     *
+     * O app NUNCA escreve neste nó: `telemetry/{vehicleId}` é o canal do
+     * rastreador (a API espelha o último ponto aqui). Gravar nele de dentro do
+     * app sobrescreveria a posição real do GPS do veículo.
+     */
     fun listenTelemetry(vehicleId: String): Flow<TelemetryData> = callbackFlow {
         val ref = rtdb.child("telemetry").child(vehicleId)
         val listener = object : ValueEventListener {
@@ -223,10 +251,6 @@ class FirebaseDataSource {
         }
         ref.addValueEventListener(listener)
         awaitClose { ref.removeEventListener(listener) }
-    }
-
-    suspend fun sendTelemetry(vehicleId: String, data: TelemetryData) {
-        rtdb.child("telemetry").child(vehicleId).setValue(data).await()
     }
 
     // ── Firebase Realtime Database: Commands ────────────────────────────────

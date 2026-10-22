@@ -37,6 +37,9 @@ class ApiClient(private val context: Context) {
     companion object {
         private const val TAG = "ApiClient"
         private const val DEFAULT_BASE_URL = "http://192.168.0.10:3000"
+
+        /** Janela de "conectado" do rastreador (mesma do painel administrativo). */
+        private const val CONNECT_WINDOW_MS = 5 * 60 * 1000L
     }
 
     // ── Configuração ──────────────────────────────────────────────────────
@@ -104,9 +107,11 @@ class ApiClient(private val context: Context) {
         return post("/v1/mobile/location", body).map { true }
     }
 
+    // A identidade no backend é o UID do Firebase Auth (string). O app não
+    // precisa do id numérico aqui — só das coordenadas.
     data class MobileLocationDto(
-        val id: Long,
-        val userId: Long,
+        val id: String,
+        val userId: String,
         val latitude: Double,
         val longitude: Double,
         val speed: Double,
@@ -124,15 +129,27 @@ class ApiClient(private val context: Context) {
         return get("/v1/mobile/location/latest").map { json ->
             val obj = JsonParser.parseString(json).asJsonObject
             val location = obj.get("location")
-            if (location.isJsonNull) null else gson.fromJson(location, MobileLocationDto::class.java)
+            if (location == null || location.isJsonNull) null else parseMobileLocation(location.asJsonObject)
         }
     }
+
+    private fun parseMobileLocation(o: JsonObject) = MobileLocationDto(
+        id        = o.optString("id") ?: "",
+        userId    = o.optString("userId") ?: "",
+        latitude  = o.optDouble("latitude"),
+        longitude = o.optDouble("longitude"),
+        speed     = o.optDouble("speed"),
+        heading   = o.optDouble("heading"),
+        accuracy  = o.optDouble("accuracy"),
+        timestamp = o.optLong("timestamp"),
+        source    = o.optString("source") ?: "mobile_app"
+    )
 
     // ── Registro de dispositivo móvel ────────────────────────────────────
 
     data class MobileDeviceDto(
-        val id: Long,
-        val userId: Long,
+        val id: String,
+        val userId: String,
         val vehicleId: Long?,
         val deviceName: String,
         val createdAt: Long,
@@ -150,15 +167,25 @@ class ApiClient(private val context: Context) {
         }
         return post("/v1/mobile/device", body).map { json ->
             val obj = JsonParser.parseString(json).asJsonObject
-            gson.fromJson(obj.getAsJsonObject("device"), MobileDeviceDto::class.java)
+            parseMobileDevice(obj.getAsJsonObject("device"))
         }
     }
+
+    private fun parseMobileDevice(o: JsonObject) = MobileDeviceDto(
+        id         = o.optString("id") ?: "",
+        userId     = o.optString("userId") ?: "",
+        vehicleId  = if (o.has("vehicleId") && !o.get("vehicleId").isJsonNull) o.optLong("vehicleId") else null,
+        deviceName = o.optString("deviceName") ?: "",
+        createdAt  = o.optLong("createdAt"),
+        updatedAt  = o.optLong("updatedAt")
+    )
 
     // ── Veículos ──────────────────────────────────────────────────────────
 
     data class VehicleDto(
         val id: Long,
         val userId: Long,
+        val ownerUid: String?,
         val plate: String,
         val model: String,
         val brand: String,
@@ -172,18 +199,58 @@ class ApiClient(private val context: Context) {
         val createdAt: Long
     )
 
+    /**
+     * Rastreador (hardware) vinculado ao veículo.
+     * Vem de `devices/{deviceId}`; `model = "server-sim"` indica o simulador
+     * do backend (veículo virtual), qualquer outro valor é um ESP32 real.
+     */
+    data class DeviceDto(
+        val deviceId: String,
+        val vehicleId: Long,
+        val firmware: String,
+        val model: String,
+        val lastSeen: Long,
+        val createdAt: Long
+    ) {
+        val isSimulated: Boolean get() = model.equals("server-sim", ignoreCase = true)
+
+        /** Falou com a API nos últimos 5 min (mesma janela usada pelo painel). */
+        val isConnected: Boolean get() = lastSeen > 0 && System.currentTimeMillis() - lastSeen < CONNECT_WINDOW_MS
+    }
+
+    /** Veículo + rastreador vinculado, como devolvido por GET /v1/vehicles/:id. */
+    data class VehicleDetailDto(
+        val vehicle: VehicleDto,
+        val device: DeviceDto?
+    )
+
     suspend fun getVehicles(): Result<List<VehicleDto>> {
         return get("/v1/vehicles").map { json ->
             val obj = JsonParser.parseString(json).asJsonObject
             val arr = obj.getAsJsonArray("vehicles")
-            arr.map { gson.fromJson(it, VehicleDto::class.java) }
+            arr.map { parseVehicle(it.asJsonObject) }
         }
     }
 
     suspend fun getVehicle(id: Long): Result<VehicleDto> {
         return get("/v1/vehicles/$id").map { json ->
             val obj = JsonParser.parseString(json).asJsonObject
-            gson.fromJson(obj.getAsJsonObject("vehicle"), VehicleDto::class.java)
+            parseVehicle(obj.getAsJsonObject("vehicle"))
+        }
+    }
+
+    /**
+     * Detalhe do veículo COM o rastreador vinculado.
+     * É o que permite ao app mostrar se há GPS real, se o aparelho está
+     * conectado e a última telemetria recebida.
+     */
+    suspend fun getVehicleDetail(id: Long): Result<VehicleDetailDto> {
+        return get("/v1/vehicles/$id").map { json ->
+            val obj = JsonParser.parseString(json).asJsonObject
+            val vehicle = parseVehicle(obj.getAsJsonObject("vehicle"))
+            val deviceEl = obj.get("device")
+            val device = if (deviceEl == null || deviceEl.isJsonNull) null else parseDevice(deviceEl.asJsonObject)
+            VehicleDetailDto(vehicle, device)
         }
     }
 
@@ -191,20 +258,50 @@ class ApiClient(private val context: Context) {
         val body = mapOf("plate" to plate, "model" to model, "brand" to brand, "year" to year, "color" to color)
         return post("/v1/vehicles", body).map { json ->
             val obj = JsonParser.parseString(json).asJsonObject
-            gson.fromJson(obj.getAsJsonObject("vehicle"), VehicleDto::class.java)
+            parseVehicle(obj.getAsJsonObject("vehicle"))
         }
     }
 
     suspend fun updateVehicle(id: Long, updates: Map<String, Any>): Result<VehicleDto> {
         return put("/v1/vehicles/$id", updates).map { json ->
             val obj = JsonParser.parseString(json).asJsonObject
-            gson.fromJson(obj.getAsJsonObject("vehicle"), VehicleDto::class.java)
+            parseVehicle(obj.getAsJsonObject("vehicle"))
         }
     }
 
     suspend fun deleteVehicle(id: Long): Result<Boolean> {
         return delete("/v1/vehicles/$id").map { true }
     }
+
+    private fun parseVehicle(o: JsonObject): VehicleDto {
+        val ownerUid = o.optString("ownerUid")
+        return VehicleDto(
+            id         = o.optLong("id"),
+            // A API devolve o uid em string para veículos criados por ela.
+            userId     = numericUserId(o.optLong("userId"), ownerUid),
+            ownerUid   = ownerUid,
+            plate      = o.optString("plate") ?: "",
+            model      = o.optString("model") ?: "",
+            brand      = o.optString("brand") ?: "",
+            year       = o.optInt("year"),
+            color      = o.optString("color") ?: "",
+            isBlocked  = o.optBool("isBlocked"),
+            latitude   = o.optDouble("latitude"),
+            longitude  = o.optDouble("longitude"),
+            speed      = o.optDouble("speed"),
+            lastUpdate = o.optLong("lastUpdate"),
+            createdAt  = o.optLong("createdAt")
+        )
+    }
+
+    private fun parseDevice(o: JsonObject) = DeviceDto(
+        deviceId  = o.optString("deviceId") ?: o.optString("id") ?: "",
+        vehicleId = o.optLong("vehicleId"),
+        firmware  = o.optString("firmware") ?: "",
+        model     = o.optString("model") ?: "",
+        lastSeen  = o.optLong("lastSeen"),
+        createdAt = o.optLong("createdAt")
+    )
 
     // ── Simulação do veículo ──────────────────────────────────────────────
 
@@ -280,14 +377,16 @@ class ApiClient(private val context: Context) {
         val speed: Double,
         val heading: Double,
         val battery: Double,
-        val timestamp: Long
+        val timestamp: Long,
+        /** Rastreador que enviou o ponto (null em pontos antigos). */
+        val deviceId: String?
     )
 
     suspend fun getLatestTelemetry(vehicleId: Long): Result<TelemetryDto?> {
         return get("/v1/vehicles/$vehicleId/telemetry/latest").map { json ->
             val obj = JsonParser.parseString(json).asJsonObject
             val latest = obj.get("latest")
-            if (latest.isJsonNull) null else gson.fromJson(latest, TelemetryDto::class.java)
+            if (latest == null || latest.isJsonNull) null else parseTelemetry(latest.asJsonObject)
         }
     }
 
@@ -295,9 +394,20 @@ class ApiClient(private val context: Context) {
         return get("/v1/vehicles/$vehicleId/telemetry/history?limit=$limit").map { json ->
             val obj = JsonParser.parseString(json).asJsonObject
             val arr = obj.getAsJsonArray("points")
-            arr.map { gson.fromJson(it, TelemetryDto::class.java) }
+            arr.map { parseTelemetry(it.asJsonObject) }
         }
     }
+
+    private fun parseTelemetry(o: JsonObject) = TelemetryDto(
+        id        = o.optLong("id"),
+        latitude  = o.optDouble("latitude"),
+        longitude = o.optDouble("longitude"),
+        speed     = o.optDouble("speed"),
+        heading   = o.optDouble("heading"),
+        battery   = o.optDouble("battery"),
+        timestamp = o.optLong("timestamp"),
+        deviceId  = o.optString("deviceId")
+    )
 
     // ── Rotas ─────────────────────────────────────────────────────────────
 
@@ -305,6 +415,7 @@ class ApiClient(private val context: Context) {
         val id: Long,
         val vehicleId: Long,
         val userId: Long,
+        val ownerUid: String?,
         val startLatitude: Double,
         val startLongitude: Double,
         val endLatitude: Double,
@@ -319,14 +430,14 @@ class ApiClient(private val context: Context) {
     suspend fun startRoute(vehicleId: Long): Result<RouteDto> {
         return post("/v1/vehicles/$vehicleId/routes/start", emptyMap()).map { json ->
             val obj = JsonParser.parseString(json).asJsonObject
-            gson.fromJson(obj.getAsJsonObject("route"), RouteDto::class.java)
+            parseRoute(obj.getAsJsonObject("route"))
         }
     }
 
     suspend fun stopRoute(vehicleId: Long): Result<RouteDto> {
         return post("/v1/vehicles/$vehicleId/routes/stop", emptyMap()).map { json ->
             val obj = JsonParser.parseString(json).asJsonObject
-            gson.fromJson(obj.getAsJsonObject("route"), RouteDto::class.java)
+            parseRoute(obj.getAsJsonObject("route"))
         }
     }
 
@@ -334,18 +445,37 @@ class ApiClient(private val context: Context) {
         return get("/v1/vehicles/$vehicleId/routes").map { json ->
             val obj = JsonParser.parseString(json).asJsonObject
             val arr = obj.getAsJsonArray("routes")
-            arr.map { gson.fromJson(it, RouteDto::class.java) }
+            arr.map { parseRoute(it.asJsonObject) }
         }
     }
 
     suspend fun getRoute(routeId: Long): Result<Pair<RouteDto, List<TelemetryDto>>> {
         return get("/v1/routes/$routeId").map { json ->
             val obj = JsonParser.parseString(json).asJsonObject
-            val route = gson.fromJson(obj.getAsJsonObject("route"), RouteDto::class.java)
+            val route = parseRoute(obj.getAsJsonObject("route"))
             val pointsArr = obj.getAsJsonArray("points")
-            val points = pointsArr.map { gson.fromJson(it, TelemetryDto::class.java) }
+            val points = pointsArr.map { parseTelemetry(it.asJsonObject) }
             Pair(route, points)
         }
+    }
+
+    private fun parseRoute(o: JsonObject): RouteDto {
+        val ownerUid = o.optString("ownerUid")
+        return RouteDto(
+            id             = o.optLong("id"),
+            vehicleId      = o.optLong("vehicleId"),
+            userId         = numericUserId(o.optLong("userId"), ownerUid),
+            ownerUid       = ownerUid,
+            startLatitude  = o.optDouble("startLatitude"),
+            startLongitude = o.optDouble("startLongitude"),
+            endLatitude    = o.optDouble("endLatitude"),
+            endLongitude   = o.optDouble("endLongitude"),
+            startTime      = o.optLong("startTime"),
+            endTime        = o.optLong("endTime"),
+            distance       = o.optDouble("distance"),
+            maxSpeed       = o.optDouble("maxSpeed"),
+            status         = o.optString("status") ?: "em_andamento"
+        )
     }
 
     // ── HTTP Helpers ──────────────────────────────────────────────────────

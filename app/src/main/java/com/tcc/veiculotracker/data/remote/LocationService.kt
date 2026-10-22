@@ -80,7 +80,11 @@ class LocationService(private val context: Context) {
             UPDATE_INTERVAL_MS
         ).apply {
             setMinUpdateIntervalMillis(FASTEST_INTERVAL_MS)
-            setWaitForAccurateLocation(true)
+            // Não espera um fix "preciso": dentro de casa o GPS não fixa e o
+            // rastreamento do celular ficaria sem enviar nada. A primeira
+            // posição (ainda que veio da rede, com precisão menor) já é
+            // publicada; depois dela o GPS refina quando conseguir.
+            setWaitForAccurateLocation(false)
         }.build()
 
         val callback = object : LocationCallback() {
@@ -100,6 +104,14 @@ class LocationService(private val context: Context) {
         } catch (e: Exception) {
             close(e)
             return@callbackFlow
+        }
+
+        // Última posição conhecida: se o GPS ainda não fixou, o app já tem
+        // uma posição real do aparelho para mostrar e enviar.
+        try {
+            fusedLocationClient.lastLocation.await()?.let { trySend(it) }
+        } catch (e: Exception) {
+            Log.w(TAG, "Sem última localização disponível: ${e.message}")
         }
 
         awaitClose {

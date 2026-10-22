@@ -3,6 +3,8 @@ package com.tcc.veiculotracker.data.model
 data class VehicleModel(
     val id: Long = 0,
     val userId: Long = 0,
+    /** UID do Firebase Auth do dono (identidade usada pela API e pelas regras). */
+    val ownerUid: String? = null,
     val plate: String = "",
     val model: String = "",
     val brand: String = "",
