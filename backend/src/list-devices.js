@@ -12,6 +12,8 @@
 // É chamado pelo api.sh para subir um simulador por veículo.
 // ─────────────────────────────────────────────────────────────────────────
 import { getFirebase, getFirebaseInitError } from './firebase/firebase-admin.js';
+import { rememberDevice, knownDevices } from './services/device-key-cache.js';
+import { isQuotaError } from './util/firestore-errors.js';
 
 const args = process.argv.slice(2);
 function argValue(name) {
@@ -56,8 +58,25 @@ try {
   for (const d of selected) {
     const vehicle = vehicles.get(String(d.vehicleId)) || {};
     process.stdout.write(`${d.deviceId}\t${d.apiKey}\t${vehicle.plate || ''}\n`);
+    // Deixa a credencial no cache local do servidor: se a cota de leitura do
+    // Firestore acabar, o simulador e a API ainda conseguem autenticar o
+    // hardware sem consultar o Firestore.
+    rememberDevice({ ...d, plate: vehicle.plate || '' });
   }
 } catch (e) {
+  // Cota de leitura esgotada (ou Firestore indisponível): usa o cache local.
+  if (isQuotaError(e)) {
+    const cached = knownDevices()
+      .filter((d) => d.model === 'server-sim')
+      .sort((a, b) => String(a.deviceId).localeCompare(String(b.deviceId)));
+    const selected = limit > 0 ? cached.slice(0, limit) : cached;
+    if (selected.length) {
+      for (const d of selected) {
+        process.stdout.write(`${d.deviceId}\t${d.apiKey}\t${d.plate || ''}\n`);
+      }
+      process.exit(0);
+    }
+  }
   process.stderr.write(`[list-devices] ${e.message}\n`);
   process.exit(1);
 }

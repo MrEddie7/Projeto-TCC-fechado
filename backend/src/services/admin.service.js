@@ -14,6 +14,9 @@ import { fileURLToPath } from 'node:url';
 import { config } from '../config.js';
 import { getFirebase, getFirebaseInitError } from '../firebase/firebase-admin.js';
 import { getSimulationDecision } from './simulation.service.js';
+import { latestPoint, recentPoints } from './telemetry-store.js';
+import { cachedVehicle, cachedDevice } from './vehicle-cache.js';
+import { isQuotaError } from '../util/firestore-errors.js';
 
 // Janela usada para considerar uma telemetria/localização "recente".
 const RECENT_MS = 5 * 60 * 1000;
@@ -69,10 +72,35 @@ function syncInfo() {
   };
 }
 
-/** Lê uma coleção inteira (o volume do projeto cabe em memória). */
+// Espelhos no RTDB para as coleções que o painel consulta sempre. O RTDB não
+// cobra cota de leitura do Firestore, então o painel continua de pé quando a
+// cota diária do Firestore acaba.
+const RTDB_MIRRORS = {
+  vehicles: 'vehicles_mirror',
+  devices: 'devices_mirror',
+};
+
+/**
+ * Lê uma coleção inteira (o volume do projeto cabe em memória).
+ * Se a cota de leitura do Firestore acabar, cai no espelho do RTDB quando
+ * existe; para as demais coleções devolve lista vazia em vez de derrubar o
+ * painel inteiro com um 500.
+ */
 async function readCollection(name) {
-  const snap = await getFirebase().firestore.collection(name).get();
-  return snap.docs.map((d) => ({ docId: d.id, ...d.data() }));
+  try {
+    const snap = await getFirebase().firestore.collection(name).get();
+    return snap.docs.map((d) => ({ docId: d.id, ...d.data() }));
+  } catch (e) {
+    if (!isQuotaError(e)) throw e;
+    const mirror = RTDB_MIRRORS[name];
+    if (!mirror) {
+      console.warn(`[admin] cota de leitura esgotada: coleção "${name}" veio vazia`);
+      return [];
+    }
+    const snap = await getFirebase().rtdb.ref(mirror).get();
+    const data = snap.val() || {};
+    return Object.entries(data).map(([docId, doc]) => ({ docId, ...doc }));
+  }
 }
 
 /** Cópia rasa sem os Timestamps do Firestore, que não serializam em JSON. */
@@ -185,16 +213,18 @@ export async function buildOverview() {
   const fb = getFirebase();
   if (!fb) throw new Error(`Firebase indisponível: ${getFirebaseInitError()}`);
 
-  const [rawUsers, rawVehicles, rawDevices, rawTelemetry, rawRoutes, rawCommands, rawMobiles, mobileLocations] =
+  const [rawUsers, rawVehicles, rawDevices, rawRoutes, rawCommands, rawMobiles, mobileLocations, liveTelemetry] =
     await Promise.all([
       readCollection('users'),
       readCollection('vehicles'),
       readCollection('devices'),
-      readCollection('telemetry'),
       readCollection('routes'),
       readCollection('commands'),
       readCollection('mobile_devices'),
       fb.rtdb.ref('mobile_locations').get().then((s) => s.val() || {}).catch(() => ({})),
+      // A telemetria ao vivo vem do RTDB: ler a coleção inteira no Firestore
+      // custava uma leitura por ponto e estourava a cota diária.
+      fb.rtdb.ref('telemetry').get().then((s) => s.val() || {}).catch(() => ({})),
     ]);
 
   // Índices auxiliares.
@@ -205,11 +235,10 @@ export async function buildOverview() {
   }
 
   const telemetryByVehicle = new Map();
-  for (const p of rawTelemetry) {
-    const vid = num(p.vehicleId, NaN);
-    if (!Number.isFinite(vid)) continue;
-    const current = telemetryByVehicle.get(vid);
-    if (!current || num(p.timestamp) > num(current.timestamp)) telemetryByVehicle.set(vid, p);
+  for (const [vid, p] of Object.entries(liveTelemetry || {})) {
+    if (!p) continue;
+    const id = num(vid, NaN);
+    if (Number.isFinite(id)) telemetryByVehicle.set(id, p);
   }
 
   // Usuários: documento em users/ + quem tem veículo, device móvel ou posição
@@ -302,7 +331,10 @@ export async function buildOverview() {
     simulatedDevices: rawDevices.filter((d) => d.model === 'server-sim').length,
     realDevices: rawDevices.filter((d) => d.model !== 'server-sim').length,
     activeDevices: rawDevices.filter((d) => online(d.lastSeen)).length,
-    telemetryPoints: rawTelemetry.length,
+    // Pontos de telemetria guardados no anel do RTDB (o histórico recente).
+    // A coleção do Firestore não é varrida: cada documento custaria uma
+    // leitura e estouraria a cota diária.
+    telemetryPoints: Object.values(liveTelemetry || {}).filter(Boolean).length,
     routes: rawRoutes.length,
     activeRoutes,
     completedRoutes: rawRoutes.length - activeRoutes,
@@ -340,30 +372,30 @@ export async function listAllVehicles() {
   const fb = getFirebase();
   if (!fb) throw new Error(`Firebase indisponível: ${getFirebaseInitError()}`);
 
-  const [rawVehicles, rawUsers, rawMobiles, userSnap, vehicleSnap, telemetrySnap] = await Promise.all([
+  const [rawVehicles, rawUsers, rawMobiles, rawDevices] = await Promise.all([
     readCollection('vehicles'),
     readCollection('users'),
     readCollection('mobile_devices'),
-    fb.firestore.collection('users').get(),
-    fb.firestore.collection('vehicles').get(),
-    fb.firestore.collection('telemetry').get(),
+    readCollection('devices'),
   ]);
-  void userSnap;
-  void vehicleSnap;
 
+  // A última telemetria vem do RTDB (telemetry/{vehicleId}). Ler a coleção
+  // inteira de telemetria no Firestore custava uma leitura por ponto — era o
+  // que estourava a cota diária do plano gratuito.
   const telemetryByVehicle = new Map();
-  for (const doc of telemetrySnap.docs) {
-    const p = doc.data();
-    const vid = num(p.vehicleId, NaN);
-    if (!Number.isFinite(vid)) continue;
-    const current = telemetryByVehicle.get(vid);
-    if (!current || num(p.timestamp) > num(current.timestamp)) telemetryByVehicle.set(vid, p);
+  try {
+    const rtdbSnap = await fb.rtdb.ref('telemetry').get();
+    const live = rtdbSnap.val() || {};
+    for (const [vid, p] of Object.entries(live)) {
+      if (!p) continue;
+      telemetryByVehicle.set(num(vid, NaN), p);
+    }
+  } catch (e) {
+    console.warn(`[admin] telemetria ao vivo indisponível: ${e.message}`);
   }
 
-  const deviceSnap = await fb.firestore.collection('devices').get();
   const deviceByVehicle = new Map();
-  for (const doc of deviceSnap.docs) {
-    const d = doc.data();
+  for (const d of rawDevices) {
     const vid = num(d.vehicleId, NaN);
     if (Number.isFinite(vid)) deviceByVehicle.set(vid, d);
   }
@@ -403,13 +435,17 @@ export async function listAllVehicles() {
 /** Detalhe de um veículo (qualquer dono) + device + telemetria recente. */
 export async function getVehicleAny(vehicleId) {
   const vehicle = await vehicleAny(vehicleId);
-  const fb = getFirebase();
-  const [deviceSnap, telemetrySnap] = await Promise.all([
-    fb.firestore.collection('devices').where('vehicleId', '==', num(vehicle.id)).limit(1).get(),
-    fb.firestore.collection('telemetry').where('vehicleId', '==', num(vehicle.id)).get(),
-  ]);
-  const device = deviceSnap.empty ? null : deviceSnap.docs[0].data();
-  const points = telemetrySnap.docs.map((d) => d.data());
+  let device = null;
+  try {
+    const deviceSnap = await getFirebase().firestore
+      .collection('devices').where('vehicleId', '==', num(vehicle.id)).limit(1).get();
+    device = deviceSnap.empty ? null : deviceSnap.docs[0].data();
+  } catch (e) {
+    if (!isQuotaError(e)) throw e;
+    device = await cachedDevice(vehicle.id);
+  }
+  // Histórico recente via RTDB (sem varrer a coleção do Firestore).
+  const points = await recentPoints(vehicle.id, { limit: 200 });
 
   return {
     vehicle: serializeVehicle(vehicle, { device: serializeDevice(device), telemetry: null }),
@@ -420,19 +456,33 @@ export async function getVehicleAny(vehicleId) {
 }
 
 async function vehicleAny(vehicleId) {
-  const snap = await getFirebase().firestore.collection('vehicles').doc(String(vehicleId)).get();
-  if (!snap.exists) throw new HttpErrorNotFound();
-  return snap.data();
+  try {
+    const snap = await getFirebase().firestore.collection('vehicles').doc(String(vehicleId)).get();
+    if (!snap.exists) throw new HttpErrorNotFound();
+    return snap.data();
+  } catch (e) {
+    if (!isQuotaError(e)) throw e;
+    const cached = await cachedVehicle(vehicleId);
+    if (!cached) throw new HttpErrorNotFound();
+    return cached;
+  }
 }
 
 async function ownerOf(uid) {
   if (!uid) return null;
-  const [userSnap, deviceSnap] = await Promise.all([
-    getFirebase().firestore.collection('users').doc(uid).get(),
-    getFirebase().firestore.collection('mobile_devices').doc(uid).get(),
-  ]);
-  const doc = userSnap.exists ? userSnap.data() : null;
-  const device = deviceSnap.exists ? deviceSnap.data() : null;
+  let doc = null;
+  let device = null;
+  try {
+    const [userSnap, deviceSnap] = await Promise.all([
+      getFirebase().firestore.collection('users').doc(uid).get(),
+      getFirebase().firestore.collection('mobile_devices').doc(uid).get(),
+    ]);
+    doc = userSnap.exists ? userSnap.data() : null;
+    device = deviceSnap.exists ? deviceSnap.data() : null;
+  } catch (e) {
+    // Cota de leitura esgotada: o painel ainda mostra a conta pelo uid.
+    if (!isQuotaError(e)) throw e;
+  }
   return {
     id: uid,
     name: doc?.name || doc?.email || device?.deviceName || 'Conta do app',
@@ -449,13 +499,8 @@ function HttpErrorNotFound() {
 /** Último ponto de telemetria de qualquer veículo. */
 export async function latestTelemetry(vehicleId) {
   const vehicle = await vehicleAny(vehicleId);
-  const snap = await getFirebase()
-    .firestore.collection('telemetry')
-    .where('vehicleId', '==', num(vehicle.id))
-    .get();
-  const points = snap.docs.map((d) => d.data());
-  points.sort((a, b) => num(b.timestamp) - num(a.timestamp));
-  const last = points[0] || null;
+  // O último ponto vem do RTDB (sem gastar cota de leitura do Firestore).
+  const last = await latestPoint(vehicle.id);
   return {
     latest: last
       ? {
@@ -484,16 +529,8 @@ export async function latestTelemetry(vehicleId) {
 /** Histórico recente de telemetria de qualquer veículo. */
 export async function telemetryHistory(vehicleId, { limit = 100, after = 0 } = {}) {
   const vehicle = await vehicleAny(vehicleId);
-  const snap = await getFirebase()
-    .firestore.collection('telemetry')
-    .where('vehicleId', '==', num(vehicle.id))
-    .get();
   const size = Math.min(Math.max(num(limit) || 100, 1), 500);
-  const points = snap.docs
-    .map((d) => d.data())
-    .filter((p) => num(p.timestamp) > num(after))
-    .sort((a, b) => num(a.timestamp) - num(b.timestamp))
-    .slice(-size);
+  const points = await recentPoints(vehicle.id, { limit: size, after });
   return {
     points: points.map((p) => ({
       id: num(p.id),
@@ -509,19 +546,31 @@ export async function telemetryHistory(vehicleId, { limit = 100, after = 0 } = {
 
 /** Documento do veículo (cru) — usado pela simulação/mapa do painel. */
 export async function rawVehicle(vehicleId) {
-  const snap = await getFirebase().firestore.collection('vehicles').doc(String(vehicleId)).get();
-  if (!snap.exists) throw HttpErrorNotFound();
-  return snap.data();
+  try {
+    const snap = await getFirebase().firestore.collection('vehicles').doc(String(vehicleId)).get();
+    if (!snap.exists) throw HttpErrorNotFound();
+    return snap.data();
+  } catch (e) {
+    if (!isQuotaError(e)) throw e;
+    const cached = await cachedVehicle(vehicleId);
+    if (!cached) throw HttpErrorNotFound();
+    return cached;
+  }
 }
 
 /** Device vinculado ao veículo (ou null). */
 export async function deviceOfVehicle(vehicleId) {
-  const snap = await getFirebase()
-    .firestore.collection('devices')
-    .where('vehicleId', '==', num(vehicleId))
-    .limit(1)
-    .get();
-  return snap.empty ? null : snap.docs[0].data();
+  try {
+    const snap = await getFirebase()
+      .firestore.collection('devices')
+      .where('vehicleId', '==', num(vehicleId))
+      .limit(1)
+      .get();
+    return snap.empty ? null : snap.docs[0].data();
+  } catch (e) {
+    if (!isQuotaError(e)) throw e;
+    return await cachedDevice(vehicleId);
+  }
 }
 
 // ── Saúde por tela (inferida dos dados reais) ──────────────────────────
@@ -617,4 +666,4 @@ function screensHealth(c) {
   ];
 }
 
-export { jsonSafe, ms };
+export { jsonSafe, ms, readCollection };

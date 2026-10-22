@@ -21,6 +21,7 @@ import {
   telemetryHistory,
   rawVehicle,
   deviceOfVehicle,
+  readCollection,
 } from '../services/admin.service.js';
 import {
   getSimulationDecision,
@@ -119,17 +120,18 @@ router.get('/vehicles/:id/telemetry/stream', asyncHandler(async (req, res) => {
 router.post(
   '/cloud/import',
   asyncHandler(async (_req, res) => {
+    // Leitura tolerante à cota do Firestore: cai no espelho do RTDB.
     const [users, vehicles, devices] = await Promise.all([
-      firestore().collection('users').get(),
-      firestore().collection('vehicles').get(),
-      firestore().collection('devices').get(),
+      readCollection('users'),
+      readCollection('vehicles'),
+      readCollection('devices'),
     ]);
     res.json({
       import: {
         storage: 'firestore',
-        accounts: users.size,
-        cloudVehicles: vehicles.size,
-        devices: devices.size,
+        accounts: users.length,
+        cloudVehicles: vehicles.length,
+        devices: devices.length,
         importedAt: Date.now(),
       },
     });

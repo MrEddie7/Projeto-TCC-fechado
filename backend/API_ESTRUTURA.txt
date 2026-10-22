@@ -2,7 +2,7 @@
  SECURITAS - BACKEND API - ESTRUTURA COMPLETA
 ================================================================================
  API de ponte entre o hardware rastreador (GPS IoT) e o app Android
- Última atualização: [2026-10-20]
+ Última atualização: [2026-10-21]
 ================================================================================
 
 ÍNDICE
@@ -167,6 +167,23 @@
                               timestamp, source }
      -> última posição do celular (POST /v1/mobile/location)
 
+   telemetry_history/{vehicleId}/{n}  { id, latitude, longitude, ... }
+     -> anel circular com os últimos 300 pontos do veículo (substitui a
+        chave n = (sequência % 300)). É o histórico recente sem gastar cota
+        de leitura do Firestore.
+
+   telemetry_seq/{vehicleId}  -> contador do anel (número do próximo ponto)
+
+   vehicles_mirror/{vehicleId}  { id, ownerUid, plate, model, brand, year,
+                                  color, isBlocked, latitude, longitude, ... }
+     -> ESPELHO dos veículos. Escrito a cada leitura/escrita bem-sucedida do
+        Firestore. Serve de fallback quando a cota de leitura do Firestore
+        acaba (ver seção "Cota do Firestore").
+
+   devices_mirror/{deviceId}  { deviceId, vehicleId, model, firmware,
+                                lastSeen, createdAt }
+     -> espelho dos rastreadores, SEM a apiKey (credencial do hardware).
+
 
 ================================================================================
  5. AUTENTICAÇÃO
@@ -219,6 +236,9 @@
 
  GET /v1/vehicles/:id  🔒
    resp 200: { vehicle, device }
+   `device` = rastreador vinculado (ou null). SEM a apiKey: essa credencial
+   só volta na criação (POST /v1/vehicles/:id/device), que é o momento da
+   provisionação do firmware.
 
  PUT /v1/vehicles/:id  🔒
    body (parcial): { plate?, model?, brand?, year?, color? }
@@ -400,6 +420,16 @@
  Credenciais: obtidas com POST /v1/vehicles/:id/device e gravadas em
  hardware/firmware/src/secrets.h (NAO versionado; veja secrets.example.h).
 
+ VINCULO RASTREADOR -> VEICULO: fica em devices/{deviceId}.vehicleId no
+ Firestore. O DEVICE_ID e a API_KEY NAO mudam quando o mesmo rastreador e
+ re-vinculado a outro veiculo: a API resolve o vinculo a cada requisicao,
+ entao a troca e feita no Firestore (ou pelo painel) e o firmware nao
+ precisa ser regravado. O proximo heartbeat ja devolve o novo veiculo em
+ GET /v1/hardware/:deviceId/status.
+
+ Estado atual do rastreador real: vt_0f662dadb31e5d63 (ESP32 + NEO-M8N)
+ -> Toyota Yaris ECA-3567 (vehicleId 0), dono edwinclarwis777@gmail.com.
+
  Sem GPS conectado o firmware nao envia telemetria (nao inventaria
  coordenadas), mas continua emitindo o heartbeat de 60s - por isso o
  rastreador aparece como "online" no painel mesmo em bancada, sem nenhum
@@ -562,6 +592,32 @@
      login/cadastro e no boot do app (quando já há sessão), enviando
      Build.MANUFACTURER + Build.MODEL. A API grava em mobile_devices/{uid}.
 
+ [5] ATUALIZAÇÃO 2026-10-21 (app x API — conflitos corrigidos):
+   - TIPOS DE `userId`: a API devolve o UID do Firebase Auth (string) para
+     veículos criados por ela, e o id numérico legado para os do app. O Gson
+     do app quebrava ("Expected a long but was STRING") e a lista de
+     veículos ficava VAZIA nas contas com veículos criados pela API.
+     Agora o app lê os campos de forma tolerante (data/remote/JsonCompat.kt)
+     e reconstrói o id numérico pelo hash do ownerUid quando necessário
+     (mesmo valor do AuthRepository).
+   - RASTREADOR: GET /v1/vehicles/:id devolve o `device` vinculado e o app
+     passou a mostrar (VehicleDetailScreen) tipo de rastreador (GPS real x
+     simulador), estado conectado/offline, último contato e a última
+     telemetria (velocidade/bateria). Atualiza a cada 15s.
+   - ESCRITA NO FIRESTORE: syncVehicle passou a fazer MERGE (antes fazia
+     `set` completo e apagava campos da API: updatedAt, posição, etc.) e a
+     gravação em edição não mexe mais em lat/lng/speed/lastUpdate — a posição
+     é da API/telemetria.
+   - ID 0 É VÁLIDO: existe um veículo com id=0 (ECA-3567) que tem rastreador
+     vinculado. O app gerava id novo quando id<=0 e criava um documento
+     duplicado (perdia o vínculo do rastreador). Agora só o CADASTRO gera id
+     (syncVehicle(vehicle, isNew=true)).
+   - O app NÃO escreve mais em RTDB telemetry/{vehicleId}: esse nó é o canal
+     do rastreador (a API espelha ali o último ponto). Escrever nele de
+     dentro do app sobrescreveria a posição real do GPS.
+   - A API deixou de devolver a apiKey do hardware nas respostas de leitura
+     (serializeDevicePublic) e passou a devolver `ownerUid` nas rotas.
+
 
 ================================================================================
  11. VARIÁVEIS DE AMBIENTE (.env)
@@ -600,6 +656,7 @@
  Estado / logs:            npm run api:status | npm run api:logs
 
  Simulador GPS (um device): VTSIM_DEVICE_ID=.. VTSIM_API_KEY=.. npm run simulator
+ Limpar telemetria antiga:  node src/prune-telemetry.js 400
  Teste rápido de health:    curl http://localhost:3000/health
  Referência de rotas:       curl http://localhost:3000/api
 
@@ -616,9 +673,63 @@
 
 
 ================================================================================
+ 12b. COTA DO FIRESTORE (plano gratuito) E COMO A API SE PROTEGE
+================================================================================
+  O projeto está no plano gratuito (Spark) do Firebase. Limites diários:
+
+    leituras:  50.000 / dia      escritas: 20.000 / dia
+
+  Dois pontos do projeto consumiam essa cota muito rápido:
+    1) o endpoint de "última posição" varria a coleção INTEIRA de telemetria
+       (where vehicleId == X, sem limite) — o app consulta a cada poucos
+       segundos e cada resposta custava milhares de leituras;
+    2) o painel administrativo lia a coleção inteira de telemetria a cada
+       atualização da frota.
+
+  O que mudou (a API continua funcionando mesmo com a cota esgotada):
+    - A posição ao vivo passou a morar no RTDB (telemetry/{vehicleId}) e o
+      histórico recente num anel de 300 pontos (telemetry_history/...). Ler a
+      posição agora custa 1 leitura do RTDB, ZERO leituras do Firestore.
+    - O painel (/v1/admin/...) lê a posição ao vivo do RTDB em vez de varrer
+      a coleção de telemetria.
+    - GET /v1/vehicles e GET /v1/vehicles/:id caem no espelho do RTDB
+      (vehicles_mirror) quando a leitura do Firestore estoura a cota.
+    - A ingestão grava no RTDB primeiro (posição ao vivo) e só depois tenta o
+      Firestore (histórico de longo prazo): se o Firestore falhar, a posição
+      continua sendo reportada.
+    - Documento do veículo e do rastreador são regravados no máximo a cada
+      120 s (a posição fina fica no RTDB) — isso segura a cota de escrita.
+    - users/{uid} é gravado no máximo a cada 5 min por conta (antes era a
+      cada requisição autenticada).
+    - A API nunca morre por erro do Firebase: há handler de unhandledRejection
+      e uncaughtException em src/server.js, e as rotas caem no fallback.
+    - A autenticação do hardware (requireDevice) usa um cache LOCAL das
+      credenciais (backend/.run/device-keys.json, ignorado pelo git) quando o
+      Firestore não pode ser lido. Sem isso, nenhuma telemetria entraria.
+    - Manutenção: node src/prune-telemetry.js 400 apaga os pontos antigos e
+      mantém a coleção pequena (quanto maior a coleção, mais cara fica
+      qualquer consulta que a varra).
+
+  Como o plano gratuito é insuficiente para uso contínuo, o recomendado é
+  ativar o plano Blaze (pay-as-you-go) com orçamento mensal e, se possível,
+  criar o índice composto (vehicleId ASC + timestamp DESC) da coleção
+  telemetry — assim a consulta de "última posição" vira 1 leitura no Firestore.
+
+  Referência de consumo (4 rastreadores simulados a cada 30 s):
+    ~8 pontos/min de telemetria   -> ~12 mil escritas/dia
+    + posição/veículo + lastSeen  ->  ~4 mil escritas/dia
+    leituras: 1 por requisição do app (antes: centenas)
+
+
+================================================================================
  13. SIMULAÇÃO DE FROTA E TESTE REAL x SIMULADOR
 ================================================================================
  Vários veículos podem ser simulados ao mesmo tempo, cada um com seu device.
+
+ Nota de cota: a frota simulada multiplica as escritas do Firestore. Com 4
+ rastreadores a cada 30 s sao ~12 mil escritas/dia -- o limite do plano
+ gratuito e de 20 mil/dia. Se a cota acabar, a API continua funcionando pelo
+ fallback no RTDB (secao 12b).
 
    Subir a API + um simulador por veículo:
      npm run api

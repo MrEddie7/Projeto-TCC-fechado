@@ -24,3 +24,13 @@ server.on('error', (err) => {
   }
   process.exit(1);
 });
+
+// A API não pode MORRER por um erro de Firebase (cota do Firestore, rede
+// instável, etc.): o app Android ficaria sem backend. Erros assíncronos não
+// tratados são registrados e o processo continua servindo — o endpoint afetado
+// responde com erro, os demais seguem funcionando.
+const fatal = (kind) => (err) => {
+  console.error(`[api] ${kind} não tratado: ${err?.stack || err?.message || err}`);
+};
+process.on('unhandledRejection', fatal('promessa rejeitada'));
+process.on('uncaughtException', fatal('exceção não capturada'));
