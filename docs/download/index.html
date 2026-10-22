@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Baixar App Securitas</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:linear-gradient(135deg,#0f1026 0%,#1a1d35 100%);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+    .card{background:rgba(255,255,255,.05);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:40px 30px;max-width:400px;width:100%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+    .logo{width:60px;height:60px;background:linear-gradient(135deg,#4f9bff 0%,#2563eb 100%);border-radius:14px;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:700;color:white}
+    h1{color:#fff;font-size:24px;margin-bottom:8px;font-weight:600}
+    .subtitle{color:rgba(255,255,255,.6);font-size:14px;margin-bottom:30px}
+    .qr{background:#fff;padding:16px;border-radius:12px;display:inline-block;margin-bottom:24px;box-shadow:0 8px 24px rgba(79,155,255,.3)}
+    .qr img{width:220px;height:220px;display:block}
+    .btn{display:inline-block;background:linear-gradient(135deg,#4f9bff 0%,#2563eb 100%);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:600;font-size:15px;transition:transform .2s,box-shadow .2s;box-shadow:0 4px 16px rgba(37,99,235,.4)}
+    .btn:hover{transform:translateY(-2px);box-shadow:0 6px 24px rgba(37,99,235,.5)}
+    .info{color:rgba(255,255,255,.5);font-size:12px;margin-top:24px;line-height:1.6}
+    .version{display:inline-block;background:rgba(255,255,255,.1);padding:4px 10px;border-radius:6px;font-size:11px;color:rgba(255,255,255,.7);margin-bottom:16px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">S</div>
+    <h1>Securitas App</h1>
+    <p class="subtitle">Rastreamento Veicular</p>
+    <div class="version">Versão Debug</div>
+    <div class="qr">
+      <img src="qr.png" alt="QR Code para download">
+    </div>
+    <br>
+    <a href="securitas-app-debug.apk" class="btn" download>Baixar APK Direto</a>
+    <p class="info">
+      Escaneie o QR Code com seu celular<br>
+      ou clique no botão acima para baixar<br><br>
+      <strong>Instalação:</strong> Permitir instalação de fontes desconhecidas
+    </p>
+  </div>
+</body>
+</html>
