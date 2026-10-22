@@ -18,6 +18,12 @@
 #define WIFI_SSID_2 "OUTRA_REDE_CONHECIDA"
 #define WIFI_PASS_2 "SENHA_DA_OUTRA_REDE"
 
+// ── Wi-Fi: terceira rede (opcional) ───────────────────────────────────────
+// Rede da maquina que roda a API. Com o ESP32 conectado nela, o endereco
+// API_BASE_URL da rede local funciona.
+#define WIFI_SSID_3 "REDE_DO_SERVIDOR"
+#define WIFI_PASS_3 "SENHA_DA_REDE_DO_SERVIDOR"
+
 // ── Rede celular (fallback via SIM7600) ───────────────────────────────────
 // Preencha conforme a operadora (ex.: Vivo, Claro, TIM).
 #define GPRS_APN    "zap.vivo.com.br"
@@ -29,11 +35,12 @@
 // maquina que roda o backend (ex.: "http://192.168.0.10:3000").
 // Se quiser expor o backend na internet, use o IP/dominio publico.
 //
-// Pode-se informar ate TRES enderecos: o firmware usa o primeiro que
+// Pode-se informar ate QUATRO enderecos: o firmware usa o primeiro que
 // responder e continua nele enquanto ele funcionar.
 #define API_BASE_URL   "http://192.168.0.10:3000"
 // #define API_BASE_URL_2 "http://192.168.0.11:3000"
-// #define API_BASE_URL_3 "https://api.securitas.app"
+// #define API_BASE_URL_3 "http://192.168.0.12:3000"
+// #define API_BASE_URL_4 "https://api.securitas.app"
 
 // ── Credenciais do rastreador ─────────────────────────────────────────────
 // Obtidas com POST /v1/vehicles/:id/device (ver API_ESTRUTURA.txt, secao 7).

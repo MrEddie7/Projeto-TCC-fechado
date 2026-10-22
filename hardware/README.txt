@@ -27,21 +27,26 @@
      Preencha:
        WIFI_SSID / WIFI_PASS    -> rede principal usada pelo ESP32
        WIFI_SSID_2 / WIFI_PASS_2-> rede reserva (usada se a principal falhar)
+       WIFI_SSID_3 / WIFI_PASS_3-> 3a rede (ex.: a rede da maquina da API)
        API_BASE_URL             -> IP da maquina que roda o backend
-       API_BASE_URL_2 / _3      -> outros enderecos do backend (opcionais)
+       API_BASE_URL_2 / _3 / _4 -> outros enderecos do backend (opcionais)
        DEVICE_ID / API_KEY      -> gerados pela API (secao 3)
 
-     O firmware conhece DUAS redes Wi-Fi e ate TRES enderecos da API. Ele
-     tenta a rede principal; se nao conseguir, tenta a reserva. Para a API,
-     usa o primeiro endereco que responder e continua nele enquanto ele
+     O firmware conhece ate TRES redes Wi-Fi e ate QUATRO enderecos da API.
+     Ele tenta a rede principal; se nao conseguir, tenta as reservas. Para a
+     API, usa o primeiro endereco que responder e continua nele enquanto ele
      funcionar. Isso evita reprogramar o rastreador quando o IP do servidor
      muda de rede.
 
      ATENCAO (rede da faculdade): o roteador ISOLA os clientes Wi-Fi entre
      si. O ESP32 (no Wi-Fi) NAO alcanca o IP Wi-Fi do servidor; ele chega no
      servidor pelo IP de rede cabeada (192.168.20.126) ou por outro
-     roteamento. Se nenhum dos tres enderecos responder, o firmware fica
+     roteamento. Se nenhum dos enderecos responder, o firmware fica
      offline e tenta de novo a cada ciclo.
+
+     DICA (bancada): a 3a rede Wi-Fi deve ser a rede em que a maquina da API
+     esta conectada AGORA. Assim, com o ESP32 nela, o primeiro endereco
+     (API_BASE_URL) funciona sem trocar nada.
 
   3. Compilar e gravar:
        cd hardware/firmware
@@ -79,6 +84,25 @@
 
   ATENCAO: criar um device via API vincula um RASTREADOR REAL ao veiculo.
   Nao confundir com a simulacao (device com model='server-sim').
+
+  ── Trocar o veiculo do rastreador (sem reflash) ────────────────────────
+
+  O vinculo rastreador -> veiculo fica em devices/{deviceId}.vehicleId no
+  Firestore; o DEVICE_ID e a API_KEY nao mudam. Para mover o mesmo
+  rastreador para outro veiculo:
+
+     1. no Firestore, em devices/{deviceId}, aponte vehicleId para o id do
+        novo veiculo (ou use o painel/API);
+     2. o proximo heartbeat ja responde com o novo veiculo:
+
+          curl http://localhost:3000/v1/hardware/<deviceId>/status \
+               -H 'x-device-id: <deviceId>' -H 'x-api-key: <apiKey>'
+
+        A resposta mostra { id, plate, model } do novo veiculo.
+
+  Nao e preciso regravar o ESP32: a API resolve o vinculo a cada requisicao.
+  (Com este rastreador: vt_0f662dadb31e5d63 -> Toyota Yaris ECA-3567, id 0,
+  dono edwinclarwis777@gmail.com.)
 
 --------------------------------------------------------------------------------
   4. PROTOCOLO IMPLEMENTADO

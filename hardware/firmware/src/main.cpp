@@ -82,12 +82,34 @@ float readBatteryVolts() {
 bool wifiConnect() {
   if (WiFi.status() == WL_CONNECTED) return true;
 
-  // Tenta a rede principal e, se nao conseguir, a rede reserva. Isso permite
-  // o rastreador funcionar em duas redes conhecidas (casa e escritorio, por
-  // exemplo) sem trocar o firmware.
+  // Tenta a rede principal e, se nao conseguir, as reservas. Isso permite
+  // o rastreador funcionar em varias redes conhecidas (casa, faculdade e
+  // escritorio, por exemplo) sem trocar o firmware.
+  //
+  // Os nomes/senhas ficam em secrets.h; as entradas que nao existirem no
+  // secrets.h ficam vazias e sao puladas.
+  const char* ssids[WIFI_NETWORK_COUNT] = {
+      WIFI_SSID,
+#ifdef WIFI_SSID_2
+      WIFI_SSID_2,
+#endif
+#ifdef WIFI_SSID_3
+      WIFI_SSID_3,
+#endif
+  };
+  const char* passes[WIFI_NETWORK_COUNT] = {
+      WIFI_PASS,
+#ifdef WIFI_PASS_2
+      WIFI_PASS_2,
+#endif
+#ifdef WIFI_PASS_3
+      WIFI_PASS_3,
+#endif
+  };
+
   for (int i = 0; i < WIFI_NETWORK_COUNT; i++) {
-    const char* ssid = (i == 0) ? WIFI_SSID : WIFI_SSID_2;
-    const char* pass = (i == 0) ? WIFI_PASS : WIFI_PASS_2;
+    const char* ssid = ssids[i];
+    const char* pass = passes[i];
     if (!ssid || strlen(ssid) == 0) continue;
 
     Serial.printf("[net] tentando Wi-Fi \"%s\"...\n", ssid);

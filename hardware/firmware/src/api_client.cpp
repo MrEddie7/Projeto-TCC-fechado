@@ -230,6 +230,9 @@ int ApiClient::baseUrlCount() {
 #ifdef API_BASE_URL_3
   if (String(API_BASE_URL_3).length() > 0) n = 3;
 #endif
+#ifdef API_BASE_URL_4
+  if (String(API_BASE_URL_4).length() > 0) n = 4;
+#endif
   return n;
 }
 
@@ -240,6 +243,9 @@ String ApiClient::baseUrlAt(int i) {
 #endif
 #ifdef API_BASE_URL_3
   if (i == 2) return String(API_BASE_URL_3);
+#endif
+#ifdef API_BASE_URL_4
+  if (i == 3) return String(API_BASE_URL_4);
 #endif
   return String();
 }

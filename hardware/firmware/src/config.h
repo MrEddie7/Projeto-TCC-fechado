@@ -48,6 +48,7 @@
 #define WIFI_RETRY_MS           5000UL   // tempo entre tentativas de Wi-Fi
 #define LTE_RETRY_MS          120000UL   // tempo entre tentativas do 4G (2 min)
 
-// Quantas redes Wi-Fi o firmware conhece (principal + reserva).
-// Os nomes/senhas ficam em secrets.h.
-#define WIFI_NETWORK_COUNT          2
+// Quantas redes Wi-Fi o firmware conhece (principal + reservas).
+// Os nomes/senhas ficam em secrets.h. Se uma rede nao existir no secrets.h,
+// o espaco correspondente fica vazio e e pulado.
+#define WIFI_NETWORK_COUNT          3
