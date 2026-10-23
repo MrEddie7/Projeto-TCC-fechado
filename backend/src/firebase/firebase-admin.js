@@ -16,19 +16,29 @@ export function getFirebase() {
   if (!initialized) {
     initialized = true;
     try {
-      if (config.firebaseServiceAccount && !fs.existsSync(config.firebaseServiceAccount)) {
+      if (
+        !process.env.FIREBASE_SERVICE_ACCOUNT_JSON &&
+        config.firebaseServiceAccount &&
+        !fs.existsSync(config.firebaseServiceAccount)
+      ) {
         // Caminho do service account configurado no .env, mas arquivo ausente.
         // Falhar de forma clara (em vez de cair no fallback ADC, que trava em
         // máquinas de desenvolvimento tentando obter OAuth token em loop).
         throw new Error(
           `Service account não encontrado: ${config.firebaseServiceAccount} ` +
             '(baixe a chave privada no Firebase Console > Configurações > Contas ' +
-            'de serviço e salve neste caminho)'
+            'de serviço e salve neste caminho; em hospedagem use a variável ' +
+            'FIREBASE_SERVICE_ACCOUNT_JSON com o JSON da chave)'
         );
       }
 
+      // Em hospedagem (Vercel) não há sistema de arquivos: as credenciais chegam
+      // pela variável FIREBASE_SERVICE_ACCOUNT_JSON com o JSON da conta de
+      // serviço inteiro. Localmente continua valendo o arquivo do .env.
       let credential;
-      if (config.firebaseServiceAccount && fs.existsSync(config.firebaseServiceAccount)) {
+      if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+        credential = cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON));
+      } else if (config.firebaseServiceAccount && fs.existsSync(config.firebaseServiceAccount)) {
         // firebase-admin v13+ exige um objeto Credential (cert()), não o JSON cru.
         credential = cert(JSON.parse(fs.readFileSync(config.firebaseServiceAccount, 'utf8')));
       } else {

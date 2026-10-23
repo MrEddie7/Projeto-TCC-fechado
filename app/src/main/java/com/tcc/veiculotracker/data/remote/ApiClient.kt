@@ -36,7 +36,10 @@ class ApiClient(private val context: Context) {
 
     companion object {
         private const val TAG = "ApiClient"
-        private const val DEFAULT_BASE_URL = "http://192.168.0.10:3000"
+        // URL padrão da API: deploy de produção na Vercel (HTTPS).
+        // Pode ser sobrescrita pelo usuário em Configurações > Vínculo de API
+        // (ex.: http://10.0.2.2:3000 no emulador, ou o IP local do servidor).
+        private const val DEFAULT_BASE_URL = "https://projeto-tcc-fechado-public.vercel.app"
 
         /** Janela de "conectado" do rastreador (mesma do painel administrativo). */
         private const val CONNECT_WINDOW_MS = 5 * 60 * 1000L

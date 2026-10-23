@@ -8,6 +8,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -40,7 +41,10 @@ fun SettingsScreen(
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar")
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
             )
         }
     ) { padding ->
@@ -65,7 +69,8 @@ fun SettingsScreen(
                 label = { Text("Nome") },
                 leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
                 modifier = Modifier.fillMaxWidth(),
-                singleLine = true
+                singleLine = true,
+                shape = MaterialTheme.shapes.small
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -76,7 +81,8 @@ fun SettingsScreen(
                 label = { Text("Email") },
                 leadingIcon = { Icon(Icons.Default.Email, contentDescription = null) },
                 modifier = Modifier.fillMaxWidth(),
-                singleLine = true
+                singleLine = true,
+                shape = MaterialTheme.shapes.small
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -87,7 +93,8 @@ fun SettingsScreen(
                 label = { Text("Telefone") },
                 leadingIcon = { Icon(Icons.Default.Phone, contentDescription = null) },
                 modifier = Modifier.fillMaxWidth(),
-                singleLine = true
+                singleLine = true,
+                shape = MaterialTheme.shapes.small
             )
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -100,39 +107,81 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            Row(
+            // Notificações: cartão tonal com a linha de controle.
+            Card(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Notificações", style = MaterialTheme.typography.bodyLarge)
-                    Text("Receber alertas", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Notifications,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Notificações", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Receber alertas",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = state.notificationsEnabled,
+                        onCheckedChange = { viewModel.updateNotifications(it) }
+                    )
                 }
-                Switch(
-                    checked = state.notificationsEnabled,
-                    onCheckedChange = { viewModel.updateNotifications(it) }
-                )
             }
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            Text(
-                text = "Intervalo de rastreamento: ${state.trackingInterval}s",
-                style = MaterialTheme.typography.bodyLarge
-            )
-            Slider(
-                value = state.trackingInterval.toFloat(),
-                onValueChange = { viewModel.updateTrackingInterval(it.toInt()) },
-                valueRange = 1f..30f,
-                steps = 28
-            )
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.Speed,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Intervalo de rastreamento: ${state.trackingInterval}s",
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
+                    Slider(
+                        value = state.trackingInterval.toFloat(),
+                        onValueChange = { viewModel.updateTrackingInterval(it.toInt()) },
+                        valueRange = 1f..30f,
+                        steps = 28
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.height(24.dp))
 
             Button(
                 onClick = { viewModel.saveSettings(name, email, phone) },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !state.isSaving
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                enabled = !state.isSaving,
+                shape = MaterialTheme.shapes.small
             ) {
                 Icon(Icons.Default.Save, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
@@ -143,7 +192,10 @@ fun SettingsScreen(
 
             OutlinedButton(
                 onClick = { showLogoutDialog = true },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = MaterialTheme.shapes.small,
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
             ) {
                 Icon(Icons.Default.Logout, contentDescription = null)
@@ -154,7 +206,9 @@ fun SettingsScreen(
             state.error?.let { error ->
                 Spacer(modifier = Modifier.height(12.dp))
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.1f))
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
+                    )
                 ) {
                     Text(
                         text = error,

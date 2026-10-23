@@ -33,17 +33,25 @@ fun BottomNavBar(
 
     NavigationBar(
         modifier = Modifier,
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         tonalElevation = 0.dp
     ) {
         items.forEach { item ->
+            val selected = currentRoute == item.route
             NavigationBarItem(
                 icon = {
                     Icon(imageVector = item.icon, contentDescription = item.label)
                 },
                 label = { Text(item.label) },
-                selected = currentRoute == item.route,
-                onClick = { onNavigate(item.route) }
+                selected = selected,
+                onClick = { onNavigate(item.route) },
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                    indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             )
         }
     }

@@ -148,7 +148,7 @@ fun ApiLinkScreen(
                         label = { Text("URL da API *") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
-                        placeholder = { Text("http://192.168.0.10:3000") }
+                        placeholder = { Text("https://projeto-tcc-fechado-public.vercel.app") }
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(

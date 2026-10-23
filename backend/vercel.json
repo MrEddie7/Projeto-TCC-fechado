@@ -1,0 +1,11 @@
+{
+  "framework": null,
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/api/[[...path]]" }
+  ],
+  "functions": {
+    "api/[[...path]].js": {
+      "includeFiles": "public/**"
+    }
+  }
+}

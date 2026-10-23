@@ -57,6 +57,14 @@ fun TrackingScreen(
         }
     }
 
+    // Confirmação do comando de bloqueio/desbloqueio.
+    LaunchedEffect(state.commandMessage) {
+        state.commandMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearCommandMessage()
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(title = { Text("Rastreamento") })
@@ -87,11 +95,29 @@ fun TrackingScreen(
                                     style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.Bold
                                 )
-                                Text(
-                                    text = state.selectedVehicle!!.plate,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = state.selectedVehicle!!.plate,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                    )
+                                    // Estado do bloqueio: o mesmo comando que o
+                                    // botão abaixo dispara, mostrado de cara.
+                                    if (state.selectedVehicle!!.isBlocked) {
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Surface(
+                                            shape = MaterialTheme.shapes.small,
+                                            color = Blocked.copy(alpha = 0.12f)
+                                        ) {
+                                            Text(
+                                                text = "BLOQUEADO",
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                                style = MaterialTheme.typography.labelLarge,
+                                                color = Blocked
+                                            )
+                                        }
+                                    }
+                                }
                             }
                             if (state.isTracking) {
                                 Surface(
@@ -168,6 +194,36 @@ fun TrackingScreen(
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(if (state.isTracking) "Parar" else "Iniciar Rastreamento")
+                            }
+
+                            // ── Bloquear / Desbloquear ──────────────────────
+                            // Morava na tela "Controle Remoto" (Dashboard →
+                            // Ver controles → escolher veículo → rolar até o
+                            // fim). Aqui fica visível enquanto se acompanha
+                            // o veículo, que é quando o comando faz sentido.
+                            val isBlocked = state.selectedVehicle!!.isBlocked
+                            OutlinedButton(
+                                onClick = {
+                                    if (isBlocked) viewModel.unblockVehicle() else viewModel.blockVehicle()
+                                },
+                                modifier = Modifier.weight(1f),
+                                enabled = !state.isBlocking,
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = if (isBlocked) Active else Blocked
+                                )
+                            ) {
+                                Icon(
+                                    if (isBlocked) Icons.Default.LockOpen else Icons.Default.Lock,
+                                    contentDescription = null
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    when {
+                                        state.isBlocking -> "Enviando..."
+                                        isBlocked -> "Desbloquear"
+                                        else -> "Bloquear"
+                                    }
+                                )
                             }
                         }
                     }

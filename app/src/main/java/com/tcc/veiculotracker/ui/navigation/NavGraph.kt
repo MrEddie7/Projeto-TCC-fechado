@@ -19,7 +19,6 @@ import com.tcc.veiculotracker.ui.screens.device.DeviceLocationScreen
 import com.tcc.veiculotracker.ui.screens.history.RouteHistoryScreen
 import com.tcc.veiculotracker.ui.screens.login.LoginScreen
 import com.tcc.veiculotracker.ui.screens.register.RegisterScreen
-import com.tcc.veiculotracker.ui.screens.remote.RemoteControlScreen
 import com.tcc.veiculotracker.ui.screens.settings.SettingsScreen
 import com.tcc.veiculotracker.ui.screens.tracking.TrackingScreen
 import com.tcc.veiculotracker.ui.screens.vehicle.VehicleDetailScreen
@@ -94,9 +93,6 @@ fun NavGraph(startDestination: String = Screen.Login.route) {
                     onNavigateToVehicleRegister = {
                         navController.navigate(Screen.VehicleRegister.route)
                     },
-                    onNavigateToRemoteControl = {
-                        navController.navigate(Screen.RemoteControl.route)
-                    },
                     onNavigateToApiLink = {
                         navController.navigate(Screen.ApiLink.route)
                     },
@@ -117,12 +113,6 @@ fun NavGraph(startDestination: String = Screen.Login.route) {
 
             composable(Screen.Tracking.route) {
                 TrackingScreen()
-            }
-
-            composable(Screen.RemoteControl.route) {
-                RemoteControlScreen(
-                    onNavigateBack = { navController.popBackStack() }
-                )
             }
 
             composable(Screen.History.route) {

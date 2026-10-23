@@ -32,7 +32,10 @@ data class TrackingState(
     val isPhoneSending: Boolean = false,
     val phoneLastSentAt: Long = 0L,
     // ── Onde a câmera do mapa deve focalizar: veículo ou celular ──
-    val mapFocusTarget: MapFocusTarget = MapFocusTarget.VEHICLE
+    val mapFocusTarget: MapFocusTarget = MapFocusTarget.VEHICLE,
+    // ── Bloqueio do veículo (botão movido para cá, ver RemoteControl) ──
+    val isBlocking: Boolean = false,
+    val commandMessage: String? = null
 )
 
 class TrackingViewModel(application: Application) : AndroidViewModel(application) {
@@ -53,6 +56,8 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
     companion object {
         private const val POLLING_INTERVAL_MS = 5000L // 5 segundos
         private const val PHONE_SEND_INTERVAL_MS = 15000L // 15 segundos
+        /** Prazo máximo de espera pelo ACK do rastreador. */
+        private const val ACK_TIMEOUT_MS = 20000L
     }
 
     init {
@@ -78,7 +83,16 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
                     )
                 }
                 .collect { vehicles ->
-                    _state.value = _state.value.copy(vehicles = vehicles, isLoading = false)
+                    _state.value = _state.value.copy(
+                        vehicles  = vehicles,
+                        isLoading = false,
+                        // O veículo selecionado era uma cópia congelada: sem
+                        // isto, o badge de bloqueio e o rótulo do botão nunca
+                        // refletiam o ACK do rastreador.
+                        selectedVehicle = _state.value.selectedVehicle?.let { sel ->
+                            vehicles.firstOrNull { it.id == sel.id } ?: sel
+                        }
+                    )
                 }
         }
     }
@@ -304,6 +318,79 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         }
         stopListening()
         stopPhoneTracking()
+    }
+
+    // ── Bloqueio do veículo ─────────────────────────────────────────────────
+    //
+    // O botão vivia na tela "Controle Remoto" (Dashboard → Ver controles →
+    // escolher veículo → rolar até o fim). Foi movido para o painel de
+    // rastreamento, que é onde o usuário já está olhando o veículo.
+
+    fun blockVehicle() = sendBlockCommand(blocked = true)
+
+    fun unblockVehicle() = sendBlockCommand(blocked = false)
+
+    private fun sendBlockCommand(blocked: Boolean) {
+        val vehicle = _state.value.selectedVehicle ?: return
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isBlocking = true, error = null)
+            try {
+                vehicleRepository.setBlocked(vehicle.id, blocked, vehicle)
+                dispatchCommand(vehicle.id, if (blocked) "block" else "unblock")
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(
+                    isBlocking = false,
+                    error = if (blocked) "Erro ao bloquear veículo" else "Erro ao desbloquear veículo"
+                )
+                return@launch
+            }
+            // O estado do bloqueio só é gravado pelo rastreador (ACK do comando):
+            // a API ignora `isBlocked` no PUT de propósito. Fica aguardando a
+            // confirmação para só então liberar o botão.
+            val confirmed = awaitBlockedState(vehicle.id, blocked)
+            _state.value = _state.value.copy(
+                isBlocking = false,
+                commandMessage = when {
+                    confirmed -> if (blocked) "Veículo bloqueado" else "Veículo desbloqueado"
+                    else -> "Comando enviado. Aguardando o rastreador confirmar."
+                }
+            )
+        }
+    }
+
+    /**
+     * Espera o Firestore refletir o estado confirmado pelo rastreador.
+     * A lista é observada em tempo real; aqui só se espera a atualização
+     * chegar, com um prazo máximo para não travar a tela.
+     */
+    private suspend fun awaitBlockedState(vehicleId: Long, blocked: Boolean): Boolean {
+        val deadline = System.currentTimeMillis() + ACK_TIMEOUT_MS
+        while (System.currentTimeMillis() < deadline) {
+            val current = _state.value.vehicles.firstOrNull { it.id == vehicleId }
+            if (current != null && current.isBlocked == blocked) return true
+            delay(400)
+        }
+        return false
+    }
+
+    /**
+     * Envia o comando pelo canal correto:
+     *  - com backend configurado, usa a fila do backend
+     *    (`POST /v1/vehicles/:id/commands`), consumida e confirmada pelo
+     *    rastreador — inclusive os veículos simulados pelo próprio backend;
+     *  - sem backend, cai para o Realtime Database (modo offline do app).
+     */
+    private suspend fun dispatchCommand(vehicleId: Long, command: String) {
+        val backend = syncManager.backendRepository
+        if (backend != null && backend.isConfigured) {
+            syncManager.sendCommandToBackend(vehicleId, command).getOrThrow()
+        } else {
+            syncManager.sendCommand(vehicleId, command)
+        }
+    }
+
+    fun clearCommandMessage() {
+        _state.value = _state.value.copy(commandMessage = null)
     }
 
     private fun hasLocationPermission(): Boolean {

@@ -1,0 +1,8 @@
+# Arquivos que não vão para o build da Vercel (economiza banda e tempo).
+node_modules
+.run
+*.log
+.env
+.env.*
+!.env.example
+firebase-service-account.json

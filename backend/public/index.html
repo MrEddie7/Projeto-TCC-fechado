@@ -157,6 +157,11 @@
     padding: 8px 11px; font-size: 12px; line-height: 1.7; backdrop-filter: blur(4px);
   }
   .hud b { font-family: ui-monospace, monospace; font-weight: 600; }
+  .hud-actions { margin-top: 6px; display: flex; gap: 6px; }
+  button.danger { color: var(--err); border-color: rgba(240,97,109,.45); }
+  button.danger:hover { border-color: var(--err); }
+  button.ok { color: var(--ok); border-color: rgba(88,214,141,.45); }
+  button.ok:hover { border-color: var(--ok); }
 
   #logs { max-height: 340px; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   #logs .row {
@@ -314,6 +319,12 @@
             <div>velocidade <b id="hudSpeed">—</b> km/h</div>
             <div>lat <b id="hudLat">—</b> · lon <b id="hudLng">—</b></div>
             <div>bateria <b id="hudBat">—</b>%</div>
+            <!-- Comando de bloqueio: o estado só muda quando o rastreador
+                 confirma (ACK), por isso o botão reflete a resposta real. -->
+            <div class="hud-actions">
+              <button type="button" id="btnBlock" class="small danger">Bloquear</button>
+              <span id="hudBlockInfo" style="align-self:center;color:var(--muted)"></span>
+            </div>
           </div>
         </div>
         <div style="display:flex; gap:16px; padding:8px 12px; font-size:11.5px; color:var(--muted); align-items:center; flex-wrap:wrap">
@@ -896,6 +907,47 @@ function setHud(plate, speed, lat, lng, battery, blocked) {
   $('hudLng').textContent = lng ?? '—';
   $('hudBat').textContent = battery ?? '—';
   $('hudBlocked').innerHTML = blocked ? '<span style="color:var(--err)">· BLOQUEADO</span>' : '';
+  updateBlockButton();
+}
+
+// Botão de bloqueio do veículo selecionado. O rótulo acompanha o estado
+// confirmado pelo rastreador (ACK), não o otimismo do clique.
+function updateBlockButton() {
+  const btn = $('btnBlock');
+  if (!btn) return;
+  const blocked = !!state.vehicle?.isBlocked;
+  const pending = btn.dataset.pending === '1';
+  btn.textContent = pending ? 'Enviando...' : (blocked ? 'Desbloquear' : 'Bloquear');
+  btn.className = 'small ' + (blocked ? 'ok' : 'danger');
+  btn.disabled = pending || !state.vehicleId;
+}
+
+// Envia o comando de bloqueio/desbloqueio ao rastreador do veículo
+// selecionado. A resposta vem pelo ACK do hardware (evento SSE `blocked`).
+async function sendBlockCommand() {
+  if (!state.vehicleId) return;
+  const btn = $('btnBlock');
+  const blocked = !!state.vehicle?.isBlocked;
+  const command = blocked ? 'unblock' : 'block';
+  btn.dataset.pending = '1';
+  updateBlockButton();
+  $('hudBlockInfo').textContent = 'aguardando rastreador...';
+  try {
+    const res = await api(`/v1/admin/vehicles/${state.vehicleId}/commands`, {
+      method: 'POST',
+      body: JSON.stringify({ command }),
+    });
+    if (!res.ok) {
+      $('hudBlockInfo').textContent = 'falha ao enviar comando';
+    }
+  } catch (e) {
+    $('hudBlockInfo').textContent = 'falha ao enviar comando';
+  } finally {
+    setTimeout(() => {
+      btn.dataset.pending = '0';
+      updateBlockButton();
+    }, 1200);
+  }
 }
 
 // Mostra o dono do veículo selecionado (visão do administrador).
@@ -961,6 +1013,7 @@ $('follow').addEventListener('change', renderLogs);
 $('onlyErr').addEventListener('change', renderLogs);
 $('btnImportCloud').addEventListener('click', importFromPhoneCloud);
 $('btnSyncFirebase').addEventListener('click', syncFirebase);
+$('btnBlock').addEventListener('click', sendBlockCommand);
 
 // ── Streams ──────────────────────────────────────────────────────────────
 
@@ -1037,6 +1090,14 @@ async function startTelemetryStream(vehicleId) {
             moveMarker(payload.latitude, payload.longitude, true);
             setHud(state.vehicle?.plate, payload.speed, payload.latitude, payload.longitude,
                    payload.battery, state.vehicle?.isBlocked);
+          } else if (event === 'blocked') {
+            // ACK do rastreador: o bloqueio só vale a partir daqui.
+            const blocked = !!payload.isBlocked;
+            setHud(state.vehicle?.plate, state.vehicle?.speed, state.vehicle?.latitude,
+                   state.vehicle?.longitude, state.vehicle?.battery, blocked);
+            $('hudBlockInfo').textContent = blocked
+              ? 'bloqueio confirmado pelo rastreador'
+              : 'veiculo desbloqueado';
           }
         }, ctrl.signal);
       } catch (e) {

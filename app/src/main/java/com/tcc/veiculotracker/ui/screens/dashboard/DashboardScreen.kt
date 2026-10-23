@@ -1,5 +1,6 @@
 package com.tcc.veiculotracker.ui.screens.dashboard
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -7,18 +8,22 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.foundation.Image
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.tcc.veiculotracker.R
 import com.tcc.veiculotracker.ui.components.VehicleCard
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
     onNavigateToVehicleRegister: () -> Unit,
-    onNavigateToRemoteControl: () -> Unit,
     onNavigateToApiLink: () -> Unit,
     onNavigateToDeviceLocation: () -> Unit,
     onNavigateToVehicleDetail: (Long) -> Unit,
@@ -31,17 +36,12 @@ fun DashboardScreen(
             TopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            shape = MaterialTheme.shapes.small,
-                            color = MaterialTheme.colorScheme.primary
-                        ) {
-                            Icon(
-                                Icons.Default.Bolt,
-                                contentDescription = null,
-                                modifier = Modifier.padding(7.dp).size(18.dp),
-                                tint = MaterialTheme.colorScheme.onPrimary
-                            )
-                        }
+                        // Marca: logo Securitas (escudo) em vez do raio.
+                        Image(
+                            painter = painterResource(R.drawable.logo),
+                            contentDescription = null,
+                            modifier = Modifier.size(30.dp)
+                        )
                         Spacer(Modifier.width(8.dp))
                         Text("Securitas", style = MaterialTheme.typography.titleMedium)
                     }
@@ -53,11 +53,18 @@ fun DashboardScreen(
                     IconButton(onClick = onNavigateToApiLink) {
                         Icon(Icons.Default.Link, contentDescription = "API")
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onNavigateToVehicleRegister) {
+            FloatingActionButton(
+                onClick = onNavigateToVehicleRegister,
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
+            ) {
                 Icon(Icons.Default.Add, contentDescription = "Cadastrar veículo")
             }
         }
@@ -76,7 +83,7 @@ fun DashboardScreen(
                 Text(
                     text = "Sua moto está segura agora.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
@@ -120,11 +127,13 @@ fun DashboardScreen(
                         text = "Meus veículos",
                         style = MaterialTheme.typography.titleLarge
                     )
-                    TextButton(onClick = onNavigateToRemoteControl) {
-                        Icon(Icons.Default.SettingsRemote, contentDescription = null)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Ver controles")
-                    }
+                    // O bloqueio do veículo ficou na aba "Rastrear", junto do
+                    // botão de iniciar o rastreamento.
+                    Text(
+                        text = "Bloqueio na aba Rastrear",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 
@@ -132,7 +141,11 @@ fun DashboardScreen(
                 item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                        ),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                     ) {
                         Column(
                             modifier = Modifier
@@ -150,12 +163,12 @@ fun DashboardScreen(
                             Text(
                                 "Nenhum veículo cadastrado ainda",
                                 style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
                                 "Toque em + para adicionar seu primeiro veículo",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
                             )
                         }
                     }
@@ -177,21 +190,44 @@ fun StatCard(
     modifier: Modifier = Modifier,
     title: String,
     value: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    color: androidx.compose.ui.graphics.Color
+    icon: ImageVector,
+    color: Color
 ) {
     Card(
         modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.14f))
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        ),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.25f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(vertical = 14.dp, horizontal = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(24.dp))
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(value, style = MaterialTheme.typography.headlineMedium, color = color, fontWeight = FontWeight.Bold)
-            Text(title, style = MaterialTheme.typography.bodySmall, color = color.copy(alpha = 0.7f))
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = color.copy(alpha = 0.14f)
+            ) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = color,
+                    modifier = Modifier.padding(6.dp).size(18.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                value,
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                title,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
