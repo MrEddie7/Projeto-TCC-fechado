@@ -87,7 +87,18 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             authRepository.signOut()
         }
-        prefs.edit().clear().apply()
+        // Remove só a SESSÃO. `clear()` apagava também a URL da API
+        // (Configurações > Vínculo de API), o tema e as preferências — quem
+        // apontava o app para um servidor próprio perdia a configuração ao
+        // sair e o app voltava a enviar dados para a URL padrão.
+        prefs.edit()
+            .remove(Constants.KEY_USER_ID)
+            .remove(Constants.KEY_FIREBASE_UID)
+            .remove(Constants.KEY_LOGGED_IN)
+            .remove(Constants.KEY_USER_NAME)
+            .remove(Constants.KEY_USER_EMAIL)
+            .remove(Constants.KEY_BACKEND_USER_ID)
+            .apply()
     }
 
     fun clearMessages() {

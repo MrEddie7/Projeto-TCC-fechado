@@ -130,25 +130,14 @@
 
   button.small { padding: 3px 8px; font-size: 11.5px; border-radius: 6px; }
 
-  .cloud-row, .sim-row {
+  .cloud-row {
     display: grid; grid-template-columns: 1fr auto; gap: 4px 10px;
     align-items: center; padding: 9px 13px; border-bottom: 1px solid rgba(38,43,54,.5);
     font-size: 12.5px;
   }
-  .cloud-row:last-child, .sim-row:last-child { border-bottom: 0; }
-  .cloud-row b, .sim-row b { font-family: ui-monospace, monospace; }
-  .cloud-row .sub, .sim-row .sub { color: var(--muted); font-size: 11.5px; }
-  .sim-row select { padding: 3px 6px; font-size: 12px; }
-  .sim-row select:disabled { opacity: .6; }
-
-  #realTest { padding: 0; }
-  .real-section { border-left: 3px solid var(--info); }
-  .rt-row {
-    display: flex; flex-direction: column; gap: 2px;
-    padding: 9px 13px; border-bottom: 1px solid rgba(38,43,54,.5); font-size: 12.5px;
-  }
-  .rt-row b { color: var(--fg); font-weight: 650; }
-  .rt-sub { color: var(--muted); font-size: 11.5px; }
+  .cloud-row:last-child { border-bottom: 0; }
+  .cloud-row b { font-family: ui-monospace, monospace; }
+  .cloud-row .sub { color: var(--muted); font-size: 11.5px; }
 
   #map { height: clamp(280px, 45vh, 460px); width: 100%; background: var(--mapbg); }
   .hud {
@@ -224,24 +213,12 @@
     <div class="card"><div class="k">Telemetria</div><div class="v" id="stTelemetry">—</div><div class="sub">pontos GPS</div></div>
     <div class="card"><div class="k">Rotas</div><div class="v" id="stRoutes">—</div><div class="sub" id="stRoutesSub">— em andamento</div></div>
     <div class="card" id="cardCommands"><div class="k">Comandos</div><div class="v" id="stCommands">—</div><div class="sub" id="stCommandsSub">— pendentes</div></div>
-    <div class="card"><div class="k">Celular</div><div class="v" id="stMobile">—</div><div class="sub" id="stMobileSub">posições do app · teste real</div></div>
-    <div class="card accent" id="cardRealTest"><div class="k">Teste real</div><div class="v" id="stRealTest">—</div><div class="sub" id="stRealTestSub">fora do simulador</div></div>
+    <div class="card"><div class="k">Celular</div><div class="v" id="stMobile">—</div><div class="sub" id="stMobileSub">posições enviadas pelo app</div></div>
   </div>
 
   <div class="layout">
-    <!-- Coluna esquerda: teste real, usuários/veículos e status das telas -->
+    <!-- Coluna esquerda: dados enviados pelo app, usuários/veículos e telas -->
     <div class="col">
-      <section class="panel real-section">
-        <div class="head">
-          <h2>Teste real · fora da simulação</h2>
-          <div class="spacer"></div>
-          <span class="chip" id="chipReal"><span class="dot"></span><span>—</span></span>
-        </div>
-        <div class="body">
-          <div id="realTest"><div class="empty-state">—</div></div>
-        </div>
-      </section>
-
       <section class="panel">
         <div class="head">
           <h2>Enviados pelo celular (Firestore)</h2>
@@ -251,24 +228,6 @@
           <span class="chip" id="chipCloud"><span class="dot"></span><span>—</span></span>
         </div>
         <div id="phoneVehicles"><div class="empty-state">Entre para ver os veículos enviados pelo app.</div></div>
-      </section>
-
-      <section class="panel">
-        <div class="head">
-          <h2>Simulação da frota</h2>
-          <div class="spacer"></div>
-          <span class="meta" id="simMeta">—</span>
-        </div>
-        <div id="simulation"><div class="empty-state">Entre para gerenciar a simulação.</div></div>
-      </section>
-
-      <section class="panel">
-        <div class="head">
-          <h2>Dispositivos Móveis Registrados</h2>
-          <div class="spacer"></div>
-          <span class="meta" id="devicesMeta">—</span>
-        </div>
-        <div id="mobileDevices"><div class="empty-state">Entre para ver os dispositivos registrados.</div></div>
       </section>
 
       <section class="panel">
@@ -328,10 +287,10 @@
           </div>
         </div>
         <div style="display:flex; gap:16px; padding:8px 12px; font-size:11.5px; color:var(--muted); align-items:center; flex-wrap:wrap">
-          <span><b style="color:var(--info)">●</b> Celular Ativo</span>
-          <span><b style="color:var(--ok)">●</b> Frota real (todos os usuários)</span>
-          <span><b style="color:var(--warn)">●</b> Frota simulador</span>
-          <span id="mapPhoneLegend" hidden><b style="color:#2979ff">●</b> Celular (teste real) · junto do veículo</span>
+          <span><b style="color:var(--info)">●</b> Celular ativo</span>
+          <span><b style="color:var(--ok)">●</b> Frota (todos os usuários)</span>
+          <span><b style="color:var(--warn)">●</b> Frota simulada</span>
+          <span id="mapPhoneLegend" hidden><b style="color:#2979ff">●</b> Celular do dono · junto do veículo</span>
         </div>
       </section>
 
@@ -360,19 +319,31 @@ $('base').textContent = BASE;
 const state = {
   token: null, vehicleId: null, vehicle: null,
   lastSeq: 0, logStream: null, telStream: null, refreshTimer: null, vehiclesById: {},
-};
+  // Sessão Firebase: o idToken expira em 1 h. Guardamos o refreshToken do login
+  // para renovar automaticamente e evitar 401 em sessões longas.
+  refreshToken: null, tokenExpiresAt: 0, tokenRefreshTimer: null, refreshing: false,
+}
 const MAX_ROWS = 400;
 
 // ── API ──────────────────────────────────────────────────────────────────
 
 async function api(path, options = {}) {
-  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
-  if (state.token) headers.Authorization = `Bearer ${state.token}`;
-  const res = await fetch(BASE + path, { ...options, headers });
-  const text = await res.text();
-  let data;
-  try { data = JSON.parse(text); } catch { data = { raw: text }; }
-  return { status: res.status, ok: res.ok, data };
+  const doFetch = async () => {
+    const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+    if (state.token) headers.Authorization = `Bearer ${state.token}`;
+    const res = await fetch(BASE + path, { ...options, headers });
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch { data = { raw: text }; }
+    return { status: res.status, ok: res.ok, data };
+  };
+  let r = await doFetch();
+  // 401 = token expirou no meio da sessão: renova uma vez e repete a chamada.
+  // Seguro até para POST: o servidor rejeita em requireAuth antes de efeito.
+  if (r.status === 401 && state.refreshToken && (await refreshIdToken())) {
+    r = await doFetch();
+  }
+  return r;
 }
 
 // Consome SSE via fetch (EventSource não envia header Authorization).
@@ -381,6 +352,11 @@ async function sse(path, onEvent, signal, onOpen) {
     headers: { Authorization: `Bearer ${state.token}`, Accept: 'text/event-stream' },
     signal,
   });
+  if (res.status === 401 && state.refreshToken) {
+    // Token expirou durante a sessão: renova já, para que a próxima tentativa
+    // de reconexão (2 s) do loop use um token válido.
+    await refreshIdToken();
+  }
   if (!res.ok) throw new Error(`stream ${res.status}`);
   if (onOpen) onOpen();
   const reader = res.body.getReader();
@@ -481,8 +457,6 @@ function renderOverview(o) {
   $('stCommandsSub').textContent = `${c.pendingCommands ?? 0} pendentes`;
   $('stMobile').textContent = c.mobileLocations ?? '—';
   $('stMobileSub').textContent = `${c.recentMobileLocations ?? 0} recentes · ${c.phoneVehicles ?? 0} veíc. do celular`;
-  $('stRealTest').textContent = (c.realVehicles ?? 0);
-  $('stRealTestSub').textContent = `${c.realVehicles ?? 0} veículo(s) reais · ${c.simulatedVehicles ?? 0} no simulador`;
   $('cardCommands').classList.toggle('warnv', (c.pendingCommands || 0) > 0);
 
   $('chipApi').className = 'chip live';
@@ -512,16 +486,13 @@ function renderOverview(o) {
 
   renderUsers(o.users || []);
   renderScreens(o.screens || []);
-  renderMobileDevices();
   // Mapa: guarda a última posição do celular por usuário, para exibir o
   // aparelho "junto do veículo" quando o proprietário está selecionado.
   mobileByUser = {};
   for (const u of o.users || []) {
     if (u && u.mobileLocation) mobileByUser[u.id] = u.mobileLocation;
   }
-  renderRealTest(o);
   renderPhoneVehicles(o);
-  renderSimulation(o);
   // Mapa: desenha a frota inteira (veículos de todos os usuários) e depois o
   // marcador do celular do proprietário selecionado.
   renderFleet(o.vehicles || []);
@@ -551,7 +522,7 @@ function renderUsers(users) {
             isPhone ? '<span class="badge phone">📱 celular</span>' : '',
             !isOnlyCloud && (v.simulated
               ? '<span class="badge sim">simulador</span>'
-              : '<span class="badge real">teste real</span>'),
+              : '<span class="badge real">real</span>'),
           ].filter(Boolean).join('');
           return `
             <div class="vehicle">
@@ -596,58 +567,14 @@ function renderScreens(screens) {
     </div>`).join('');
 }
 
-// Dados NÃO ligados ao simulador: posições do celular (app) e veículos reais.
-// São apresentados como "teste real", evidência de funcionamento fora da simulação.
-function renderRealTest(o) {
-  const box = $('realTest');
-  const chip = $('chipReal');
-  const users = o.users || [];
-  const phones = users.filter((u) => u.mobileLocation);
-  const realVehicles = [];
-  for (const u of users) {
-    for (const v of u.vehicles || []) {
-      if (!v.simulated) realVehicles.push({ user: u, vehicle: v });
-    }
-  }
-
-  const livePhones = (phones.filter((u) => u.mobileLocation.timestamp >= Date.now() - 5 * 60 * 1000)).length;
-
-  if (!phones.length && !realVehicles.length) {
-    box.innerHTML = '<div class="empty-state">Ainda sem dados reais. Envie a posição do celular pelo app para vê-la aqui.</div>';
-    setChip(chip, 'warn', 'aguardando teste real');
-    return;
-  }
-  setChip(chip, livePhones > 0 ? 'live' : '', livePhones > 0 ? `${livePhones} celular(es) ao vivo` : 'sem celular ao vivo');
-
-  const rows = [];
-  for (const u of phones) {
-    const m = u.mobileLocation;
-    rows.push(`
-      <div class="rt-row">
-        <b>  ${esc(u.name)} · celular</b>
-        <span class="rt-sub">${(m.latitude ?? 0).toFixed(5)}, ${(m.longitude ?? 0).toFixed(5)} · precisão ${(m.accuracy ?? 0).toFixed(1)} m · ${esc(m.source || 'app')} · ${fmtAgo(m.timestamp)}</span>
-      </div>`);
-  }
-  for (const r of realVehicles) {
-    rows.push(`
-      <div class="rt-row">
-        <b>  ${esc(r.vehicle.plate)} · veículo real</b>
-        <span class="rt-sub">${esc(r.vehicle.brand)} ${esc(r.vehicle.model)} · ${isLive(r.vehicle) ? 'online' : 'offline'} · de ${esc(r.user.name)}</span>
-      </div>`);
-  }
-  box.innerHTML = rows.join('');
-}
-
-// Veículos que o app (celular) enviou ao Firestore. Mostra quais já foram
-// importados para o backend (têm rastreador/id numérico) e quais ainda estão
-// apenas na nuvem. O botão "Sincronizar do celular" dispara a importação.
+// Veículos cadastrados pelo app (celular) — a coleção vehicles do Firestore.
+// Mostra o rastreador vinculado a cada um (real, virtual do simulador ou
+// nenhum) e se está ao vivo. "Sincronizar do celular" relê a nuvem; o
+// "Sincronizar Firebase" replica contas e dispositivos móveis no RTDB.
 function renderPhoneVehicles(o) {
   const box = $('phoneVehicles');
   const chip = $('chipCloud');
   const list = o.phoneVehicles || [];
-  const imported = list.filter((v) => v.source !== 'firestore').length;
-  const onlyCloud = list.length - imported;
-
   if (!list.length) {
     box.innerHTML = '<div class="empty-state">Nenhum veículo enviado pelo celular ainda.</div>';
     setChip(chip, 'warn', 'nenhum');
@@ -655,87 +582,37 @@ function renderPhoneVehicles(o) {
   }
   setChip(chip, 'live', `${list.length} do celular`);
 
+  // Todo veículo do Firestore foi cadastrado pelo app: separá-los em
+  // "importado" x "só na nuvem" não dizia nada (o servidor marca todos com
+  // source='firestore'). O que muda de fato é ter rastreador vinculado — e se
+  // ele é físico ou virtual (simulador).
+  const withTracker = list.filter((v) => v.device).length;
+  const virtual = list.filter((v) => v.simulated).length;
+
   box.innerHTML = list.map((v) => {
     const owner = v.owner || {};
-    const state = v.source === 'firestore'
-      ? '<span class="badge off">só na nuvem</span>'
-      : '<span class="badge on">no backend</span>';
     const tracker = v.device
-      ? `rastreador ${esc(v.device.model || 'app')} · ${v.device.simulated ? 'virtual' : 'real'}`
-      : 'sem rastreador';
+      ? (v.simulated
+        ? '<span class="badge sim">rastreador virtual</span>'
+        : '<span class="badge real">rastreador real</span>')
+      : '<span class="badge off">sem rastreador</span>';
+    const device = v.device
+      ? esc(v.device.deviceId || '') + (v.device.model ? ' · ' + esc(v.device.model) : '')
+      : 'aguardando vínculo';
     return `
       <div class="cloud-row">
         <div>
-          <b>${esc(v.plate)}</b> ${state}
+          <b>${esc(v.plate)}</b> ${tracker}
           <div class="sub">${esc(v.brand)} ${esc(v.model)} · ${esc(v.year)} · dono ${esc(owner.name || owner.email || '—')}</div>
+          <div class="sub">${device}</div>
         </div>
         <div class="sub" style="text-align:right">
-          ${isLive(v) ? 'online' : 'offline'} · ${tracker}
+          ${isLive(v) ? 'online' : 'offline'} · ${v.speed ?? 0} km/h<br>${fmtAgo(v.lastUpdate)}
         </div>
       </div>`;
   }).join('') +
-    `<div class="sub" style="padding:8px 13px">${imported} importado(s) · ${onlyCloud} só na nuvem</div>`;
-}
-
-// Seletor por veículo: adiciona/tira da simulação. Veículos com rastreador real
-// (hardware/'app-tracker') não podem ser simulados — a opção fica desabilitada.
-function renderSimulation(o) {
-  const box = $('simulation');
-  const list = [];
-  for (const u of o.users || []) {
-    for (const v of u.vehicles || []) {
-      // Exclui apenas veículos que ainda só existem na nuvem (source='firestore' E sem device).
-      const onlyCloud = (v.source === 'firestore') && !(v.device);
-      if (!onlyCloud) list.push({ user: u, vehicle: v });
-    }
-  }
-  const simulated = list.filter((x) => x.vehicle.simulated).length;
-  $('simMeta').textContent = `${simulated}/${list.length} no simulador`;
-
-  if (!list.length) {
-    box.innerHTML = '<div class="empty-state">Nenhum veículo no backend ainda.</div>';
-    return;
-  }
-
-  box.innerHTML = list.map(({ user, vehicle }) => {
-    const sim = vehicle.simulation || {};
-    const hasRealTracker = sim.hasDevice && !sim.deviceSimulated;
-    const onOpt = hasRealTracker
-      ? '<option value="1" disabled>Simulador (rastreador real)</option>'
-      : `<option value="1"${vehicle.simulated ? ' selected' : ''}>Simulador</option>`;
-    const offOpt = `<option value="0"${vehicle.simulated ? '' : ' selected'}>Teste real</option>`;
-    const simDisabled = !sim.simulationAvailable;
-    return `
-      <div class="sim-row">
-        <div>
-          <b>${esc(vehicle.plate)}</b>
-          <div class="sub">${esc(user.name)} · ${esc(vehicle.brand)} ${esc(vehicle.model)}${hasRealTracker ? ' · rastreador real' : ''}</div>
-        </div>
-        <select data-vehicle="${vehicle.id}"${simDisabled ? ' disabled' : ''} title="${esc(sim.reason || '')}">
-          ${offOpt}${onOpt}
-        </select>
-      </div>`;
-  }).join('');
-
-  box.querySelectorAll('select[data-vehicle]').forEach((sel) => {
-    sel.addEventListener('change', onSimulationChange);
-  });
-}
-
-async function onSimulationChange(ev) {
-  const sel = ev.target;
-  const id = Number(sel.dataset.vehicle);
-  const simulate = sel.value === '1';
-  sel.disabled = true;
-  const res = await api(`/v1/admin/vehicles/${id}/simulation`, {
-    method: 'POST',
-    body: JSON.stringify({ simulate }),
-  });
-  sel.disabled = false;
-  if (!res.ok) {
-    alert(res.data.error || 'Não foi possível alterar a simulação.');
-  }
-  await refreshOverview();
+    `<div class="sub" style="padding:8px 13px">${withTracker} com rastreador (${virtual} virtual(is)) · ` +
+    `${list.length - withTracker} sem rastreador</div>`;
 }
 
 async function importFromPhoneCloud() {
@@ -755,9 +632,15 @@ async function importFromPhoneCloud() {
   }
   const imp = res.data.import || {};
   if (imp.error) {
+    setChip($('chipCloud'), 'err', 'erro no Firestore');
     alert('Firestore indisponível: ' + imp.error);
     return;
   }
+  setChip($('chipCloud'), 'live', `${imp.cloudVehicles ?? 0} do celular`);
+  alert(
+    `Leitura do celular concluída:\n• Contas: ${imp.accounts ?? 0}\n` +
+    `• Veículos na nuvem: ${imp.cloudVehicles ?? 0}\n• Rastreadores: ${imp.devices ?? 0}`
+  );
   await refreshOverview();
 }
 
@@ -809,7 +692,7 @@ const marker = L.circleMarker([-23.5505, -46.6333], {
   radius: 9, color: '#fff', weight: 2, fillColor: '#4c8dff', fillOpacity: .95,
 }).addTo(map);
 
-// Marcador do CELULAR (teste real): exibido junto do veículo quando o
+// Marcador do CELULAR (dado real do app): exibido junto do veículo quando o
 // proprietário enviou a posição pelo app.
 const phoneMarker = L.circleMarker([-23.5505, -46.6333], {
   radius: 7, color: '#fff', weight: 1.5, fillColor: '#2979ff', fillOpacity: .95,
@@ -851,9 +734,13 @@ const fleetLayer = L.layerGroup().addTo(map);
 let fleetByVehicle = {};
 let mobileByUser = {};
 let centered = false;
+// O marcador arrastável é "ligado" só para veículos simulados. L.marker não
+// expõe getOpacity() (só setOpacity): guardamos a visibilidade aqui — ler a
+// opacidade direto do Leaflet lança TypeError e derrubava o carregamento.
+let dragVisible = false;
 
-// Desenha no mapa a frota inteira (todos os usuários). Cor: verde = teste real
-// (fora do simulador), amarelo = simulador. Veículos offline ficam esmaecidos.
+// Desenha no mapa a frota inteira (todos os usuários). Cor: verde = veículo
+// real (fora do simulador), amarelo = simulador. Veículos offline ficam esmaecidos.
 function renderFleet(vehicles) {
   fleetLayer.clearLayers();
   fleetByVehicle = {};
@@ -871,7 +758,7 @@ function renderFleet(vehicles) {
     mk.bindPopup(
       `<b>${esc(v.plate)}</b><br>${esc(v.brand)} ${esc(v.model)}<br>` +
       `dono: ${esc(owner)}<br>${v.speed ?? 0} km/h · ${isLive(v) ? 'online' : 'offline'}` +
-      `<br><span style="color:${color}">${v.simulated ? 'simulador' : 'teste real'}</span>`
+      `<br><span style="color:${color}">${v.simulated ? 'simulador' : 'real'}</span>`
     );
     mk.on('click', () => {
       const sel = $('vehicle');
@@ -967,7 +854,7 @@ function moveMarker(lat, lng, animate) {
   marker.setLatLng([lat, lng]);
   // Se o marcador arrastável está visível (veículo simulado selecionado),
   // move-o junto para ficar sincronizado com o circleMarker.
-  if (dragMarker && dragMarker.getOpacity() === 1) {
+  if (dragVisible) {
     dragMarker.setLatLng([lat, lng]);
   }
   if (animate && !centered) { map.setView([lat, lng], 16); centered = true; }
@@ -1153,8 +1040,10 @@ async function selectVehicle(id) {
       if (v.simulated) {
         dragMarker.setLatLng([v.latitude, v.longitude]);
         dragMarker.setOpacity(1);
+        dragVisible = true;
       } else {
         dragMarker.setOpacity(0);
+        dragVisible = false;
       }
     }
     if (v.userId != null) { state.vehiclesById[id] = { userId: v.userId, plate: v.plate, ownerName: res.data.owner?.name }; }
@@ -1213,7 +1102,66 @@ async function firebaseSignIn(email, password) {
     }[msg] || msg;
     return { ok: false, error: friendly };
   }
-  return { ok: true, idToken: data.idToken, email: data.email, localId: data.localId };
+  return {
+    ok: true,
+    idToken: data.idToken,
+    refreshToken: data.refreshToken,
+    expiresIn: data.expiresIn,
+    email: data.email,
+    localId: data.localId,
+  };
+}
+
+// ── Renovação do token ──────────────────────────────────────────────────────
+// O idToken do Firebase vale 1 h. Sem renovação, sessões longas caem em 401 (o
+// servidor chama verifyIdToken e rejeita token expirado). Guardamos o refreshToken
+// do login e o trocamos por um idToken novo antes de expirar.
+function applySession({ idToken, refreshToken, expiresIn }) {
+  state.token = idToken;
+  if (refreshToken) state.refreshToken = refreshToken;
+  state.tokenExpiresAt = Date.now() + (Number(expiresIn) || 3600) * 1000;
+  scheduleTokenRefresh();
+}
+
+// Agenda a renovação ~60 s antes de o token expirar; cada renovação reagenda.
+function scheduleTokenRefresh() {
+  if (state.tokenRefreshTimer) clearTimeout(state.tokenRefreshTimer);
+  state.tokenRefreshTimer = null;
+  if (!state.refreshToken || !state.tokenExpiresAt) return;
+  const msAteExpirar = state.tokenExpiresAt - Date.now();
+  const em = Math.max(msAteExpirar - 60_000, 10_000); // 60 s antes (mín. 10 s)
+  state.tokenRefreshTimer = setTimeout(refreshIdToken, em);
+}
+
+// Troca o refreshToken por um idToken novo (endpoint token do Firebase). O guard
+// `state.refreshing` evita rajada de renovações quando vários loops levam 401.
+async function refreshIdToken() {
+  if (!state.refreshToken || state.refreshing) return false;
+  state.refreshing = true;
+  let ok = false;
+  try {
+    const key = await loadAuthConfig();
+    if (key) {
+      const res = await fetch(`https://securetoken.googleapis.com/v1/token?key=${key}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: state.refreshToken }),
+      });
+      const data = await res.json().catch(() => ({}));
+      // Resposta do endpoint token usa snake_case (id_token/refresh_token/expires_in).
+      if (res.ok && data.id_token) {
+        applySession({ idToken: data.id_token, refreshToken: data.refresh_token, expiresIn: data.expires_in });
+        ok = true;
+      }
+    }
+  } catch { /* rede fora: tenta de novo daqui a pouco */ }
+  finally { state.refreshing = false; }
+  // Falhou? Tenta de novo em 30 s enquanto ainda houver refreshToken.
+  if (!ok && state.refreshToken) {
+    if (state.tokenRefreshTimer) clearTimeout(state.tokenRefreshTimer);
+    state.tokenRefreshTimer = setTimeout(refreshIdToken, 30_000);
+  }
+  return ok;
 }
 
 $('loginForm').addEventListener('submit', async (ev) => {
@@ -1226,7 +1174,7 @@ $('loginForm').addEventListener('submit', async (ev) => {
     setChip($('chipAuth'), 'err', out.error || 'falha no login');
     return;
   }
-  state.token = out.idToken;
+  applySession({ idToken: out.idToken, refreshToken: out.refreshToken, expiresIn: out.expiresIn });
   setChip($('chipAuth'), 'live', 'autenticado');
   $('btnLogout').hidden = false;
   await Promise.all([startLogStream(), loadVehicles(), refreshOverview()]);
@@ -1236,6 +1184,9 @@ $('loginForm').addEventListener('submit', async (ev) => {
 $('btnLogout').addEventListener('click', async () => {
   // Logout é local: o payload é um ID Token autenticado no Firebase.
   state.token = null;
+  state.refreshToken = null;
+  state.tokenExpiresAt = 0;
+  if (state.tokenRefreshTimer) { clearTimeout(state.tokenRefreshTimer); state.tokenRefreshTimer = null; }
   stopLogStream();
   stopRefreshTimer();
   if (state.telStream) state.telStream.abort();
@@ -1250,12 +1201,8 @@ $('btnLogout').addEventListener('click', async () => {
   $('screens').innerHTML = '<div class="empty-state">—</div>';
   $('screensMeta').textContent = '—';
   $('usersMeta').textContent = '—';
-  $('realTest').innerHTML = '<div class="empty-state">—</div>';
-  setChip($('chipReal'), '', '—');
   $('phoneVehicles').innerHTML = '<div class="empty-state">Entre para ver os veículos enviados pelo app.</div>';
   setChip($('chipCloud'), '', '—');
-  $('simulation').innerHTML = '<div class="empty-state">Entre para gerenciar a simulação.</div>';
-  $('simMeta').textContent = '—';
   $('mapPhoneLegend').hidden = true;
   fleetLayer.clearLayers();
   fleetByVehicle = {};
