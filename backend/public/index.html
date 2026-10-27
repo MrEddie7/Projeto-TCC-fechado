@@ -113,7 +113,9 @@
   .user .who .email { color: var(--muted); font-size: 12px; font-family: ui-monospace, monospace; }
   .user .who .id { color: var(--muted); font-size: 11px; }
   .vehicle {
-    display: grid; grid-template-columns: 1fr auto; gap: 2px 10px;
+    /* minmax(0,1fr): sem isso a coluna da direita (hora + km/h) empurra a
+       grade para fora do cartão em telas de 320px e o texto é cortado. */
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px;
     margin-top: 7px; padding: 7px 9px; border: 1px solid var(--line);
     border-radius: 7px; background: var(--panel2);
   }
@@ -131,7 +133,7 @@
   button.small { padding: 3px 8px; font-size: 11.5px; border-radius: 6px; }
 
   .cloud-row {
-    display: grid; grid-template-columns: 1fr auto; gap: 4px 10px;
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px;
     align-items: center; padding: 9px 13px; border-bottom: 1px solid rgba(38,43,54,.5);
     font-size: 12.5px;
   }
@@ -173,12 +175,40 @@
   }
   @media (max-width: 640px) {
     .screens { grid-template-columns: 1fr; }
-    header { gap: 8px; padding: 9px 12px; }
     header h1 { font-size: 13px; }
     header .base { display: none; }
     #loginForm { width: 100%; }
     #loginForm input { flex: 1 1 120px; min-width: 0; }
     main { padding: 10px; }
+
+    /* Em tela estreita o cabeçalho quebrava em quatro linhas e, sendo fixo,
+       consumia 156px da altura para sempre. Vira faixa normal do fluxo. */
+    header { position: static; gap: 8px; row-gap: 6px; padding: 9px 12px; }
+
+    /* Título + botões no cabeçalho do painel: quebra linha em vez de
+       espremer "ENVIADOS PELO CELULAR (FIRESTORE)" em três linhas. */
+    .panel > .head { flex-wrap: wrap; row-gap: 6px; }
+    /* O título ganha a linha inteira e os controles descem para a linha
+       seguinte: sem isso o texto quebrava em três linhas ao lado dos botões. */
+    .panel > .head h2 { flex: 1 1 100%; font-size: 11px; letter-spacing: .5px; }
+
+    /* O seletor do mapa assumia a largura da opção mais longa (428px) e era
+       cortado pelo overflow do painel — a placa ficava ilegível. */
+    #vehicle { flex: 1 1 auto; min-width: 0; max-width: 100%; }
+
+    /* Logs: as cinco colunas fixas (216px + gaps) deixavam 34px para o
+       caminho da requisição. Duas linhas: hora/método/status/duração em
+       cima, caminho inteiro embaixo. */
+    #logs .row { display: flex; flex-wrap: wrap; gap: 2px 10px; }
+    /* O caminho é o último da linha de cima na ordem visual (`order`), senão
+       ele quebra antes de status/duração e cada requisição gasta três
+       linhas em vez de duas. */
+    #logs .row .p { order: 1; flex: 1 0 100%; white-space: normal; overflow: visible; text-overflow: clip; word-break: break-all; }
+    #logs .row .d { margin-left: auto; }
+
+    /* HUD do mapa: ocupa a largura da caixa em vez de cobrir metade da
+       altura do mapa com 174px. */
+    .hud { left: 8px; right: 8px; bottom: 8px; padding: 6px 9px; font-size: 11px; line-height: 1.5; }
   }
 </style>
 </head>
