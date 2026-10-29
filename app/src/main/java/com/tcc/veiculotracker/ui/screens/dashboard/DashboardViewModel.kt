@@ -17,7 +17,10 @@ data class DashboardState(
     val blockedVehicles: Int = 0,
     val vehicles: List<VehicleModel> = emptyList(),
     val isLoading: Boolean = true,
-    val error: String? = null
+    val error: String? = null,
+    // Edição/exclusão disparadas pelo cartão do veículo.
+    val isSaving: Boolean = false,
+    val feedback: String? = null
 )
 
 class DashboardViewModel(application: Application) : AndroidViewModel(application) {
@@ -44,6 +47,65 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         }
         loadDashboard()
     }
+
+    /**
+     * Edição cadastral do veículo, feita direto no cartão da aba principal.
+     * Só os campos do cadastro vão para a API: posição e bloqueio continuam
+     * sendo do rastreador (o PUT da API ignora esses campos de propósito).
+     */
+    fun updateVehicle(
+        vehicle: VehicleModel,
+        plate: String,
+        brand: String,
+        model: String,
+        year: String,
+        color: String
+    ) {
+        if (plate.isBlank() || brand.isBlank() || model.isBlank()) {
+            _state.value = _state.value.copy(feedback = "Preencha placa, marca e modelo")
+            return
+        }
+        val edited = vehicle.copy(
+            plate = plate.trim().uppercase(),
+            brand = brand.trim(),
+            model = model.trim(),
+            year  = year.trim().toIntOrNull() ?: 0,
+            color = color.trim()
+        )
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isSaving = true, feedback = null)
+            vehicleRepository.updateVehicle(edited).fold(
+                onSuccess = {
+                    _state.value = _state.value.copy(isSaving = false, feedback = "Veículo atualizado")
+                },
+                onFailure = { e ->
+                    _state.value = _state.value.copy(
+                        isSaving = false,
+                        feedback = e.message ?: "Não foi possível salvar as alterações"
+                    )
+                }
+            )
+        }
+    }
+
+    fun deleteVehicle(vehicle: VehicleModel) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isSaving = true, feedback = null)
+            vehicleRepository.deleteVehicle(vehicle).fold(
+                onSuccess = {
+                    _state.value = _state.value.copy(isSaving = false, feedback = "Veículo excluído")
+                },
+                onFailure = { e ->
+                    _state.value = _state.value.copy(
+                        isSaving = false,
+                        feedback = e.message ?: "Não foi possível excluir o veículo"
+                    )
+                }
+            )
+        }
+    }
+
+    fun clearFeedback() { _state.value = _state.value.copy(feedback = null) }
 
     private fun loadDashboard() {
         val userName = prefs.getString(Constants.KEY_USER_NAME, "Usuário") ?: "Usuário"

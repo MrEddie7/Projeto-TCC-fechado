@@ -96,6 +96,8 @@ export function createApp() {
         mobile: [
           'POST /v1/mobile/location',
           'GET /v1/mobile/location/latest',
+          'POST /v1/mobile/push-token',
+          'DELETE /v1/mobile/push-token',
           'POST /v1/mobile/device',
           'GET /v1/mobile/device',
           'DELETE /v1/mobile/device',

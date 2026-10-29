@@ -126,6 +126,8 @@ class AuthRepository(
         // Registra este aparelho na API: é o que faz o celular aparecer como
         // "dispositivo registrado" no painel administrativo.
         ensureDeviceRegistered()
+        // Envia à API o token de push deste aparelho (alertas de bloqueio).
+        com.tcc.veiculotracker.data.remote.PushTokenManager.registerCurrentToken(context)
         return user
     }
 

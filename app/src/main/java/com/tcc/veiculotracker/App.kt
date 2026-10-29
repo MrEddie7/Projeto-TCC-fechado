@@ -48,7 +48,11 @@ class App : Application() {
         // backend ainda não conhece este aparelho. Registra uma vez no boot,
         // sem bloquear a inicialização da UI.
         if (FirebaseAuth.getInstance().currentUser != null) {
-            appScope.launch { authRepository.ensureDeviceRegistered() }
+            appScope.launch {
+                authRepository.ensureDeviceRegistered()
+                // Re-registra o token de push (novos aparelhos/reinstalação).
+                com.tcc.veiculotracker.data.remote.PushTokenManager.registerCurrentToken(this@App)
+            }
         }
     }
 }

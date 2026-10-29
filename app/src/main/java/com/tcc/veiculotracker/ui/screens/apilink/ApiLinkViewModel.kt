@@ -37,6 +37,12 @@ class ApiLinkViewModel(application: Application) : AndroidViewModel(application)
         repository.apiUrl   = apiUrl.trim()
         repository.apiToken = apiKey.trim()
         _state.value = _state.value.copy(isSaving = false, saved = true, apiUrl = apiUrl.trim())
+        // Com a API conhecida, o aparelho pode registrar o token de push.
+        // Falha é silenciosa: ocorre de novo no próximo boot/login.
+        viewModelScope.launch {
+            com.tcc.veiculotracker.data.remote.PushTokenManager
+                .registerCurrentToken(getApplication())
+        }
     }
 
     fun clearConfig() {

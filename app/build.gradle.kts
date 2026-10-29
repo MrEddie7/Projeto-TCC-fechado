@@ -63,6 +63,7 @@ dependencies {
     implementation(libs.firebase.auth)
     implementation(libs.firebase.database)
     implementation(libs.firebase.firestore)
+    implementation("com.google.firebase:firebase-messaging")
     implementation(libs.googleid)
     implementation(libs.osmdroid)
     implementation(libs.kotlinx.coroutines.android)

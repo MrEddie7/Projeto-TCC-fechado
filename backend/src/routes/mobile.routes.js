@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getFirebase } from '../firebase/firebase-admin.js';
 import { requireAuth } from '../middleware/auth.js';
+import { savePushToken, removePushToken } from '../services/notifications.service.js';
 import { asyncHandler } from '../middleware/error.js';
 import { HttpError } from '../util/http-error.js';
 
@@ -56,6 +57,30 @@ router.post(
     // Estado atual, não histórico: RTDB é a fonte para a última localização.
     await getFirebase().rtdb.ref(`mobile_locations/${req.user.uid}`).set(location);
     res.status(201).json({ ok: true, location: serializeLocation(location) });
+  })
+);
+
+// POST /v1/mobile/push-token
+// Registra o token FCM deste aparelho para receber push (ex.: alerta de
+// bloqueio confirmado pelo rastreador). Autenticado pelo ID Token do Firebase.
+router.post(
+  '/push-token',
+  asyncHandler(async (req, res) => {
+    const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    if (!token || token.length > 4096) throw new HttpError(400, 'Token FCM inválido');
+    await savePushToken(req.user.uid, token);
+    res.status(201).json({ ok: true });
+  })
+);
+
+// DELETE /v1/mobile/push-token
+// Revoga o token deste aparelho (logout).
+router.delete(
+  '/push-token',
+  asyncHandler(async (req, res) => {
+    const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    if (token) await removePushToken(req.user.uid, token);
+    res.json({ ok: true });
   })
 );
 

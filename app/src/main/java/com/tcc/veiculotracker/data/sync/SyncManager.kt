@@ -52,7 +52,9 @@ class SyncManager(
      * existente — inclusive o id 0, que é um veículo real com rastreador.
      */
     suspend fun syncVehicle(vehicle: VehicleModel, isNew: Boolean = false) {
-        runCatching { firebaseDataSource.syncVehicle(vehicle, isNew) }
+        // Erros sobem para quem chamou (a edição/exclusão avisa o usuário);
+        // antes o runCatching aqui escondia falhas de permissão do Firestore.
+        firebaseDataSource.syncVehicle(vehicle, isNew)
     }
 
     /**
@@ -66,7 +68,7 @@ class SyncManager(
     }
 
     suspend fun deleteVehicle(vehicleId: Long) {
-        runCatching { firebaseDataSource.deleteVehicle(vehicleId.toString()) }
+        firebaseDataSource.deleteVehicle(vehicleId.toString())
     }
 
     suspend fun pullVehicles(userId: Long): List<VehicleModel> {

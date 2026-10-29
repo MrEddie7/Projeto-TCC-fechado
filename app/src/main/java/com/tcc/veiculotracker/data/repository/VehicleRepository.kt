@@ -63,14 +63,16 @@ class VehicleRepository(
     /**
      * Edição cadastral. Com backend configurado, só a API altera o documento
      * (evita `set` completo com dados defasados do Firestore).
+     *
+     * Devolve o erro em vez de engoli-lo: a tela de edição precisa dizer ao
+     * usuário quando o servidor recusou a alteração (ex.: placa duplicada).
      */
-    suspend fun updateVehicle(vehicle: VehicleModel) {
+    suspend fun updateVehicle(vehicle: VehicleModel): Result<Unit> {
         val backend = syncManager.backendRepository
         if (backend != null && backend.isConfigured) {
-            runCatching { backend.updateVehicle(vehicle) }
-            return
+            return backend.updateVehicle(vehicle).map { }
         }
-        runCatching { syncManager.syncVehicle(vehicle) }
+        return runCatching { syncManager.syncVehicle(vehicle) }
     }
 
     /**
@@ -106,11 +108,16 @@ class VehicleRepository(
         // Intencionalmente vazio — ver comentário acima.
     }
 
-    suspend fun deleteVehicle(vehicle: VehicleModel) {
+    /**
+     * Exclusão do veículo. Com backend configurado, a API apaga o documento e
+     * é ela quem manda: se a exclusão falhar, NÃO tentamos apagar direto no
+     * Firestore (o veículo voltaria no próximo sincronismo, com estado parcial).
+     */
+    suspend fun deleteVehicle(vehicle: VehicleModel): Result<Unit> {
         val backend = syncManager.backendRepository
         if (backend != null && backend.isConfigured) {
-            runCatching { backend.deleteVehicle(vehicle.id) }
+            return backend.deleteVehicle(vehicle.id).map { }
         }
-        runCatching { syncManager.deleteVehicle(vehicle.id) }
+        return runCatching { syncManager.deleteVehicle(vehicle.id) }
     }
 }

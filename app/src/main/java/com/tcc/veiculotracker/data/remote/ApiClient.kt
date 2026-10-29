@@ -483,6 +483,19 @@ class ApiClient(private val context: Context) {
 
     // ── HTTP Helpers ──────────────────────────────────────────────────────
 
+    // Push (FCM): token deste aparelho, guardado em userTokens/{uid} pela API
+    // e usado no alerta de bloqueio/desbloqueio confirmado pelo rastreador.
+
+    /** Registra o token FCM deste aparelho. */
+    suspend fun registerPushToken(token: String): Result<Boolean> {
+        return post("/v1/mobile/push-token", mapOf("token" to token)).map { true }
+    }
+
+    /** Revoga o token FCM (logout). Falha aqui não é crítica. */
+    suspend fun removePushToken(token: String): Result<Boolean> {
+        return delete("/v1/mobile/push-token", mapOf("token" to token)).map { true }
+    }
+
     private suspend fun get(path: String): Result<String> = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url("$baseUrl$path")
@@ -516,11 +529,13 @@ class ApiClient(private val context: Context) {
         execute(request)
     }
 
-    private suspend fun delete(path: String): Result<String> = withContext(Dispatchers.IO) {
+    private suspend fun delete(path: String, body: Map<String, Any?> = emptyMap()): Result<String> = withContext(Dispatchers.IO) {
+        val requestBody = if (body.isEmpty()) null
+            else gson.toJson(body).toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
             .url("$baseUrl$path")
             .apply { firebaseBearer()?.let { header("Authorization", it) } }
-            .delete()
+            .delete(requestBody)
             .build()
         execute(request)
     }

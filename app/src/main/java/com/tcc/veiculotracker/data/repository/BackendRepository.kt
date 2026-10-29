@@ -61,6 +61,20 @@ class BackendRepository(
         return if (model.startsWith(manufacturer, ignoreCase = true)) model else "$manufacturer $model"
     }
 
+    // Push (FCM): a API guarda o token em userTokens/{uid} e usa para avisar
+    // o dono quando o rastreador confirma bloqueio/desbloqueio.
+
+    suspend fun registerPushToken(token: String): Result<Boolean> {
+        if (!isConfigured) return Result.failure(IllegalStateException("API não configurada"))
+        return apiClient.registerPushToken(token)
+            .onFailure { Log.w(TAG, "registerPushToken falhou: ${it.message}") }
+    }
+
+    suspend fun removePushToken(token: String): Result<Boolean> {
+        if (!isConfigured) return Result.failure(IllegalStateException("API não configurada"))
+        return apiClient.removePushToken(token)
+    }
+
     // ── Auth (legado) ─────────────────────────────────────────────────────────
     // O app autentica pelo Firebase Auth (AuthRepository). Estes métodos usam os
     // endpoints /v1/auth/* da API, que na migração deixaram de existir (o backend
