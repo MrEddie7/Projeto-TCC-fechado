@@ -10,6 +10,11 @@
 // precisam liberar escrita para o app (o app fala com esta API).
 import { getFirebase } from '../firebase/firebase-admin.js';
 import { getMessaging } from 'firebase-admin/messaging';
+// arrayUnion/arrayRemove não são exportados direto do subpacote; chegam via
+// FieldValue, a API canônica do SDK Admin.
+import { FieldValue } from 'firebase-admin/firestore';
+const arrayUnion = FieldValue.arrayUnion;
+const arrayRemove = FieldValue.arrayRemove;
 
 export const USER_TOKENS_COLLECTION = 'userTokens';
 
