@@ -121,6 +121,7 @@ function serializeDevice(device) {
   if (!device) return null;
   return {
     deviceId: device.deviceId || device.docId,
+    apiKey: device.apiKey || '',
     firmware: device.firmware || '',
     model: device.model || '',
     lastSeen: num(device.lastSeen),

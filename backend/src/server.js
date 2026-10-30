@@ -1,8 +1,6 @@
 import os from 'node:os';
 import { config } from './config.js';
-import { createApp } from './app.js';
-
-const app = createApp();
+import app from './app.js';
 
 // `server.js` sobe um listener TCP (uso local, via npm start / api.sh). Em
 // ambientes serverless (Vercel) quem importa é o handler, que só precisa do

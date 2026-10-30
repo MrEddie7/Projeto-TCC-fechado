@@ -180,3 +180,11 @@ export function createApp() {
 function requireAuthSafe(req, res, next) {
   return Promise.resolve(requireAuth(req, res, next)).catch(next);
 }
+
+// Instância compartilhada do app. A Vercel detecta este arquivo como o
+// entrypoint do serviço (é quem importa o Express) e usa `export default` como
+// handler da função serverless — sem default export, toda invocação falha com
+// FUNCTION_INVOCATION_FAILED. O uso local (src/server.js) reutiliza esta mesma
+// instância em vez de criar outra.
+const app = createApp();
+export default app;
