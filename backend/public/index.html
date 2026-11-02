@@ -313,7 +313,7 @@
                  confirma (ACK), por isso o botão reflete a resposta real. -->
             <div class="hud-actions">
               <button type="button" id="btnBlock" class="small danger">Bloquear</button>
-              <button type="button" id="btnSim" class="small">Simular</button>
+              <button type="button" id="btnSim" class="small" hidden>Simular</button>
               <span id="hudBlockInfo" style="align-self:center;color:var(--muted)"></span>
             </div>
           </div>
@@ -351,6 +351,8 @@ $('base').textContent = BASE;
 const state = {
   token: null, vehicleId: null, vehicle: null,
   lastSeq: 0, logStream: null, telStream: null, refreshTimer: null, vehiclesById: {},
+  // Simulação do veículo selecionado (alimenta o botão "Simular" do HUD).
+  vehicleSimulated: false, vehicleHasDevice: false, vehicleSimulation: null,
   // Sessão Firebase: o idToken expira em 1 h. Guardamos o refreshToken do login
   // para renovar automaticamente e evitar 401 em sessões longas.
   refreshToken: null, tokenExpiresAt: 0, tokenRefreshTimer: null, refreshing: false,
@@ -530,6 +532,60 @@ function renderOverview(o) {
   renderFleet(o.vehicles || []);
   updatePhoneMarker();
 }
+
+// ── Simulação (frota virtual) ─────────────────────────────────────────────
+//
+// A simulação é representada pelo device virtual (model='server-sim') do
+// veículo: quem cria/remove é POST /v1/admin/vehicles/:id/simulation. Veículo
+// com rastreador real não pode entrar na simulação, então o botão nem aparece.
+//
+// As listas são regeradas a cada refresh da visão geral; por isso o clique é
+// tratado por delegação no documento (um listener só), e não um por botão.
+function simToggleButton(v) {
+  if (!v) return '';
+  const sim = v.simulation || {};
+  if (sim.simulationAvailable === false) return '';
+  if (v.device && !v.simulated) return ''; // rastreador real: não simula
+
+  const next = v.simulated ? '0' : '1';
+  const label = v.simulated ? 'Tirar da simulação' : 'Simular';
+  const title = sim.reason || (v.simulated
+    ? 'Remove o rastreador virtual deste veículo'
+    : 'Cria um rastreador virtual que movimenta o veículo');
+  return '<div class="sim-actions">' +
+    `<button type="button" class="small sim-toggle" data-sim-id="${Number(v.id)}" ` +
+    `data-sim-next="${next}" title="${esc(title)}">${label}</button></div>`;
+}
+
+// Põe/tira o veículo da simulação e relê a visão geral (o device e o estado do
+// veículo mudam; se for o selecionado no mapa, o HUD/marcadores acompanham).
+async function toggleSimulation(btn) {
+  const id = Number(btn.dataset.simId);
+  const simulate = btn.dataset.simNext === '1';
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = simulate ? 'Ativando…' : 'Removendo…';
+  try {
+    const res = await api(`/v1/admin/vehicles/${id}/simulation`, {
+      method: 'POST',
+      body: JSON.stringify({ simulate }),
+    });
+    if (!res.ok) throw new Error(res.data?.error || `HTTP ${res.status}`);
+    await refreshOverview();
+    if (state.vehicleId === id) await selectVehicle(id);
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = label;
+    alert(`Erro ao ${simulate ? 'adicionar à' : 'remover da'} simulação: ${err.message}`);
+  }
+}
+
+document.addEventListener('click', (ev) => {
+  const btn = ev.target && ev.target.closest ? ev.target.closest('.sim-toggle') : null;
+  if (!btn) return;
+  ev.preventDefault();
+  toggleSimulation(btn);
+});
 
 function renderUsers(users) {
   const box = $('users');
@@ -843,6 +899,32 @@ function updateBlockButton() {
   btn.disabled = pending || !state.vehicleId;
 }
 
+// Estado de simulação do veículo selecionado, vindo de
+// GET /v1/admin/vehicles/:id (`simulated`, `device` e a decisão `simulation`).
+function setHudSim(simulated, hasDevice, simulation) {
+  state.vehicleSimulated = !!simulated;
+  state.vehicleHasDevice = !!hasDevice;
+  state.vehicleSimulation = simulation || null;
+  updateSimButton();
+}
+
+// Botão "Simular" do HUD: age no veículo selecionado. Some quando não há o que
+// fazer (nenhum veículo, rastreador real vinculado ou simulação desligada no
+// servidor), em vez de ficar clicável e não fazer nada.
+function updateSimButton() {
+  const btn = $('btnSim');
+  if (!btn) return;
+  const sim = state.vehicleSimulation || {};
+  const available = sim.simulationAvailable !== false;
+  const realTracker = state.vehicleHasDevice && !state.vehicleSimulated;
+  const pending = btn.dataset.pending === '1';
+  btn.hidden = !state.vehicleId || !available || realTracker;
+  btn.className = 'small';
+  btn.textContent = pending ? '…' : (state.vehicleSimulated ? 'Tirar da simulação' : 'Simular');
+  btn.disabled = pending || !state.vehicleId;
+  btn.title = sim.reason || '';
+}
+
 // Envia o comando de bloqueio/desbloqueio ao rastreador do veículo
 // selecionado. A resposta vem pelo ACK do hardware (evento SSE `blocked`).
 async function sendBlockCommand() {
@@ -935,6 +1017,33 @@ $('onlyErr').addEventListener('change', renderLogs);
 $('btnImportCloud').addEventListener('click', importFromPhoneCloud);
 $('btnSyncFirebase').addEventListener('click', syncFirebase);
 $('btnBlock').addEventListener('click', sendBlockCommand);
+
+// "Simular" do HUD: adiciona/remove o veículo selecionado da frota virtual.
+$('btnSim').addEventListener('click', async () => {
+  if (!state.vehicleId) return;
+  const btn = $('btnSim');
+  const simulate = !state.vehicleSimulated;
+  btn.dataset.pending = '1';
+  updateSimButton();
+  $('hudBlockInfo').textContent = simulate ? 'adicionando à simulação…' : 'removendo da simulação…';
+  try {
+    const res = await api(`/v1/admin/vehicles/${state.vehicleId}/simulation`, {
+      method: 'POST',
+      body: JSON.stringify({ simulate }),
+    });
+    if (!res.ok) throw new Error(res.data?.error || `HTTP ${res.status}`);
+    $('hudBlockInfo').textContent = res.data?.vehicle?.simulated
+      ? 'simulação ativa (rastreador virtual)'
+      : 'simulação removida';
+    await refreshOverview();
+    await selectVehicle(state.vehicleId);
+  } catch (err) {
+    $('hudBlockInfo').textContent = 'falha: ' + err.message;
+  } finally {
+    btn.dataset.pending = '0';
+    updateSimButton();
+  }
+});
 
 // ── Streams ──────────────────────────────────────────────────────────────
 
@@ -1040,6 +1149,7 @@ async function loadVehicles() {
   sel.innerHTML = '';
   if (!list.length) {
     setHud(null, null, null, null, null, false);
+    setHudSim(false, false, null);
     setHudOwner(null);
     $('hudPlate').textContent = 'sem veículos';
     return;
@@ -1066,6 +1176,7 @@ async function selectVehicle(id) {
   if (res.ok) {
     const v = res.data.vehicle;
     setHud(v.plate, v.speed, v.latitude, v.longitude, null, v.isBlocked);
+    setHudSim(v.simulated, Boolean(v.device), v.simulation);
     setHudOwner(res.data.owner?.name || null);
     if (v.latitude && v.longitude) {
       moveMarker(v.latitude, v.longitude, true);
