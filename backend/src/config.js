@@ -63,8 +63,8 @@ export const config = {
 
   // ── Simulação de veículos ─────────────────────────────────────────────
   // Quando um veículo entra na simulação, a API cria um "rastreador virtual"
-  // (device com model='server-sim'). Quem movimenta o veículo é o simulador
-  // de hardware, iniciado pelo api.sh.
+  // (device com model='server-sim') e sobe o processo do simulador. O painel
+  // (e o app) ligam/desligam isso em POST /v1/admin/vehicles/:id/simulation.
   simulationEnabled: (process.env.SIMULATION_ENABLED || 'true').toLowerCase() === 'true',
 
   // ── Firebase (Firestore + Realtime Database) ──────────────────────────

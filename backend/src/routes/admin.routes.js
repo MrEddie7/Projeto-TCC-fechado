@@ -26,12 +26,13 @@ import {
 import {
   getSimulationDecision,
   applySimulationDecision,
+  simulateFromBody,
   setVehiclePosition,
   getSimControl,
   syncFirebaseUsers,
   syncMobileDevicesToRtdb,
 } from '../services/simulation.service.js';
-import { COMMANDS, enqueueCommand, serializeCommand } from '../services/commands.service.js';
+import { COMMANDS, commandFromBody, enqueueCommand, serializeCommand } from '../services/commands.service.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -94,7 +95,7 @@ router.post(
   '/vehicles/:id/commands',
   asyncHandler(async (req, res) => {
     const vehicle = await rawVehicle(req.params.id);
-    const command = req.body?.command;
+    const command = commandFromBody(req.body);
     if (!COMMANDS.includes(command)) throw new HttpError(400, 'Comando inválido');
     const data = await enqueueCommand(vehicle.id, command, req.body?.note || '');
     res.status(201).json({ command: serializeCommand(data) });
@@ -194,14 +195,14 @@ router.post(
   '/vehicles/:id/simulation',
   asyncHandler(async (req, res) => {
     const vehicle = await rawVehicle(req.params.id);
-    const simulate = req.body?.simulate;
+    const simulate = simulateFromBody(req.body);
     if (typeof simulate !== 'boolean') {
       throw new HttpError(400, 'Informe simulate: true (simular) ou false (teste real)');
     }
     const { vehicle: updated, device } = await applySimulationDecision(vehicle, simulate);
     res.json({
       simulation: getSimulationDecision(updated, device),
-      vehicle: serializeVehicle(updated),
+      vehicle: { ...serializeVehicle(updated), simulated: Boolean(device && device.model === 'server-sim') },
       device: serializeDevice(device),
     });
   })

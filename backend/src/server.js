@@ -1,6 +1,7 @@
 import os from 'node:os';
 import { config } from './config.js';
 import app from './app.js';
+import { startSimulationFleet, stopSimulationFleet } from './services/simulation-fleet.js';
 
 // `server.js` sobe um listener TCP (uso local, via npm start / api.sh). Em
 // ambientes serverless (Vercel) quem importa é o handler, que só precisa do
@@ -22,7 +23,18 @@ if (!process.env.VERCEL) {
       .filter((i) => i && i.family === 'IPv4' && !i.internal)
       .map((i) => i.address);
     for (const ip of lan) console.log(`  -> rede local: http://${ip}:${config.port} (URL que o app Android deve usar)`);
+    startSimulationFleet().catch((e) => {
+      console.warn(`[sim-fleet] falha ao iniciar a frota: ${e.message}`);
+    });
   });
+
+  const shutdown = () => {
+    stopSimulationFleet();
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 1500).unref();
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {

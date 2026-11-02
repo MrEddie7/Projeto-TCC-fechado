@@ -13,6 +13,8 @@ import { HttpError } from '../util/http-error.js';
 import { firestore, rtdb, makeId } from './firestore-store.js';
 import { publishToVehicle } from '../realtime/sse.js';
 import { getFirebase } from '../firebase/firebase-admin.js';
+import { rememberDevice } from './device-key-cache.js';
+import { startSimulatedDevice, stopSimulatedDevice } from './simulation-fleet.js';
 
 export const SERVER_SIM_MODEL = 'server-sim';
 
@@ -34,6 +36,23 @@ async function simDeviceOf(vehicleId) {
  * @param {object} vehicle documento do Firestore
  * @param {object|null} [device] device já carregado (evita nova leitura)
  */
+/** Lê `simulate` mesmo quando o runtime entrega o JSON como string. */
+export function simulateFromBody(body) {
+  if (body == null) return undefined;
+  let value = body;
+  if (typeof body === 'string') {
+    try { value = JSON.parse(body); } catch { return undefined; }
+  }
+  if (typeof value === 'object' && Buffer.isBuffer(value)) {
+    try { value = JSON.parse(value.toString()); } catch { return undefined; }
+  }
+  if (typeof value === 'object' && value && 'simulate' in value) value = value.simulate;
+  if (typeof value === 'boolean') return value;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return undefined;
+}
+
 export function getSimulationDecision(vehicle, device = undefined) {
   const hasDevice = device !== undefined ? Boolean(device) : Boolean(vehicle.device);
   const resolved = device !== undefined ? device : vehicle.device;
@@ -107,8 +126,12 @@ export async function applySimulationDecision(vehicle, simulate) {
       await db.collection('devices').doc(deviceId).set(device);
       await vehicleRef.set({ latitude: startLat, longitude: startLng, updatedAt: now }, { merge: true });
     }
+    rememberDevice({ ...device, plate: vehicle.plate || '' });
+    startSimulatedDevice(device);
   } else if (isServerSim(device)) {
-    await db.collection('devices').doc(device.deviceId).delete();
+    const removedId = device.deviceId;
+    stopSimulatedDevice(removedId);
+    await db.collection('devices').doc(removedId).delete();
     await rtdb().ref(`telemetry/${vehicle.id}`).remove().catch(() => {});
     device = null;
   }

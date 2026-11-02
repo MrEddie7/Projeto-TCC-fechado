@@ -11,6 +11,7 @@ import {
 import {
   getSimulationDecision,
   applySimulationDecision,
+  simulateFromBody,
 } from '../services/simulation.service.js';
 
 const router = Router();
@@ -180,7 +181,7 @@ router.get('/:id/simulation', asyncHandler(async (req, res) => {
 
 router.post('/:id/simulation', asyncHandler(async (req, res) => {
   const v = await readVehicle(req.user.uid, req.params.id);
-  const simulate = req.body?.simulate;
+  const simulate = simulateFromBody(req.body);
   if (typeof simulate !== 'boolean') throw new HttpError(400, 'Informe simulate: true (simular) ou false (teste real)');
   const { vehicle, device } = await applySimulationDecision(v, simulate);
   await mirrorVehicles([vehicle]);

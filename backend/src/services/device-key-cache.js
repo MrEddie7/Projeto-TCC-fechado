@@ -49,6 +49,15 @@ export function rememberDevice(device) {
   writeAll(all);
 }
 
+/** Remove a credencial do cache (veículo saiu da simulação). */
+export function forgetDevice(deviceId) {
+  if (!deviceId) return;
+  const all = readAll();
+  if (!(String(deviceId) in all)) return;
+  delete all[String(deviceId)];
+  writeAll(all);
+}
+
 /** Credencial conhecida de um rastreador (ou null). */
 export function knownDevice(deviceId) {
   return readAll()[String(deviceId)] || null;

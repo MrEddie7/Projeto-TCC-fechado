@@ -115,6 +115,12 @@ launch_bg() {
 }
 
 start() {
+  if [ "${START_SIMULATOR:-true}" = "false" ]; then
+    export START_SIMULATOR=false
+  else
+    export START_SIMULATOR=true
+  fi
+
   if is_running "$API_PID"; then
     echo "[api] já está no ar (pid $(cat "$API_PID")) em ${API_URL}"
   else
@@ -136,67 +142,17 @@ start() {
     fi
   fi
 
+  # A frota virtual (server-sim) agora é filha do processo da API: o painel
+  # adiciona/remove veículos da simulação sem precisar de restart. START_SIMULATOR
+  # ainda desliga isso (exportado para o Node). PIDs antigos de sim-*.pid são
+  # só resíduos de versões anteriores — o stop abaixo continua limpando.
   if [ "${START_SIMULATOR:-true}" = "false" ]; then
+    export START_SIMULATOR=false
     echo "[sim] pulado (START_SIMULATOR=false)"
-    return 0
+  else
+    export START_SIMULATOR=true
+    echo "[sim] gerenciado pela API — no painel: Simular / Tirar da simulação"
   fi
-
-  if is_running "$SIM_PID"; then
-    echo "[sim] já está no ar (pid $(cat "$SIM_PID"))"
-    return 0
-  fi
-
-  # Lista a frota (Firestore): um device por veículo vinculado — exclui os
-  # rastreadores virtuais de simulação. SIM_FLEET limita a quantidade, o que
-  # ajuda quando o projeto tem muitos veículos de teste.
-  local limit="${SIM_FLEET:-0}" rows
-  rows="$(cd "$DIR" && node src/list-devices.js "$limit" 2>/dev/null || true)"
-
-  if [ -z "$rows" ]; then
-    echo "[sim] ignorado: nenhum rastreador no Firestore. Crie um device com POST /v1/vehicles/:id/device." >&2
-    return 0
-  fi
-
-  # VTSIM_DEVICE_ID fixa um device só e ignora a frota.
-  local env_device env_key
-  env_device="$(env_value VTSIM_DEVICE_ID)"
-  env_key="$(env_value VTSIM_API_KEY)"
-  if [ -n "$env_device" ] && [ -n "$env_key" ]; then
-    rows="$(printf '%s\t%s\t(fixo)\n' "$env_device" "$env_key")"
-  fi
-
-  : >"$SIM_LOG"
-  export VTSIM_API_URL="$API_URL"
-  rm -f "$RUN_DIR"/sim-*.pid
-
-  local count=0 line device_id api_key plate pid
-  while IFS=$'\t' read -r device_id api_key plate; do
-    [ -n "$device_id" ] || continue
-    # Precisa ser export antes da chamada: um prefixo "VAR=x $(...)" só
-    # valeria para a expansão da própria substituição, e o launch_bg roda
-    # dentro dela - o node nasceria sem as credenciais.
-    export VTSIM_DEVICE_ID="$device_id" VTSIM_API_KEY="$api_key" VTSIM_API_URL="$API_URL"
-    pid="$(launch_bg "$SIM_LOG" src/hardware-simulator.js)" || true
-    if [ -n "$pid" ]; then
-      echo "$pid" >"$RUN_DIR/sim-${count}.pid"
-      echo "[sim] ${count} no ar (pid ${pid}) - ${plate} / ${device_id}"
-      count=$((count + 1))
-    else
-      echo "[sim] ${count} FALHOU ao subir - ${device_id}" >&2
-    fi
-  done <<<"$rows"
-
-  if [ "$count" -eq 0 ]; then
-    echo "[sim] nenhum simulador subiu. Log:" >&2
-    tail -n 15 "$SIM_LOG" >&2
-    return 1
-  fi
-
-  # O primeiro simulador fica no sim.pid, para stop/status antigos seguirem
-  # funcionando sem mudança.
-  cp "$RUN_DIR/sim-0.pid" "$SIM_PID"
-  sleep 1
-  echo "[sim] ${count} simulador(es) ativo(s)"
 }
 
 # ── stop ─────────────────────────────────────────────────────────────────

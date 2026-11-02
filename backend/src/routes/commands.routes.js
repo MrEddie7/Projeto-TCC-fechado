@@ -3,13 +3,13 @@ import { requireAuth } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/error.js';
 import { HttpError } from '../util/http-error.js';
 import { firestore, ownedVehicle } from '../services/firestore-store.js';
-import { COMMANDS, enqueueCommand, serializeCommand } from '../services/commands.service.js';
+import { COMMANDS, commandFromBody, enqueueCommand, serializeCommand } from '../services/commands.service.js';
 
 const router = Router();
 router.use(requireAuth);
 const out = serializeCommand;
 router.post('/:vehicleId/commands', asyncHandler(async (req,res) => {
-  const vehicle=await ownedVehicle(req.user.uid,req.params.vehicleId), command=req.body?.command;
+  const vehicle=await ownedVehicle(req.user.uid,req.params.vehicleId), command=commandFromBody(req.body);
   if (!COMMANDS.includes(command)) throw new HttpError(400,'Comando inválido');
   const data=await enqueueCommand(vehicle.id,command,req.body?.note || '');
   res.status(201).json({command:out(data)});

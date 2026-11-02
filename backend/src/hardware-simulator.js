@@ -196,6 +196,7 @@ async function boot() {
 await boot();
 console.log(`[sim] enviando telemetria a cada ${INTERVAL_MS}ms (Ctrl+C para parar)`);
 
+await pollCommands();
 await sendTelemetry();
 const timer = setInterval(async () => {
   try {
