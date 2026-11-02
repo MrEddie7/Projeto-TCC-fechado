@@ -345,6 +345,9 @@ export async function buildOverview() {
     recentMobileLocations: recentMobile,
     mobileDevices: rawMobiles.length,
     phoneVehicles: phoneVehicles.length,
+    // O painel usa isto para não oferecer "Simular"/"+ Simulado" quando o
+    // servidor desliga a frota virtual (SIMULATION_ENABLED=false na Vercel).
+    simulationAvailable: config.simulationEnabled,
   };
 
   return {

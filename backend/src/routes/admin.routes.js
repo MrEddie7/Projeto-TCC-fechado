@@ -13,6 +13,7 @@ import { HttpError } from '../util/http-error.js';
 import { serializeVehicle, serializeDevice } from './vehicles.routes.js';
 import { subscribeVehicle, publishToVehicle } from '../realtime/sse.js';
 import { firestore, makeId } from '../services/firestore-store.js';
+import { config } from '../config.js';
 import { mirrorVehicles, mirrorDevice } from '../services/vehicle-cache.js';
 import {
   buildOverview,
@@ -220,6 +221,12 @@ const PLATE = /^[A-Z]{3}\d[A-Z0-9]\d{2}$|^[A-Z]{3}-\d{4}$/;
 router.post(
   '/simulation/vehicles',
   asyncHandler(async (req, res) => {
+    // Precisa checar ANTES de gravar: criar o veículo e só então descobrir que
+    // a simulação está desligada deixava um veículo órfão no Firestore (foi o
+    // que aconteceu na Vercel, onde SIMULATION_ENABLED=false).
+    if (!config.simulationEnabled) {
+      throw new HttpError(409, 'Simulação desativada no servidor (SIMULATION_ENABLED=false)');
+    }
     const { plate, model, brand, year, color = '' } = req.body || {};
     const normalized = String(plate || '').trim().toUpperCase().replace(/\s+/g, '');
     if (!model || !brand || !PLATE.test(normalized)) {
@@ -256,8 +263,16 @@ router.post(
     await fs.collection('vehicles').doc(String(vehicle.id)).set(vehicle);
 
     // applySimulationDecision cria o device server-sim (com apiKey) e, quando a
-    // API roda local, sobe o simulador desse rastreador.
-    const { vehicle: updated, device } = await applySimulationDecision(vehicle, true);
+    // API roda local, sobe o simulador desse rastreador. Se falhar depois de o
+    // veículo já existir, apaga o documento em vez de deixar lixo.
+    let applied;
+    try {
+      applied = await applySimulationDecision(vehicle, true);
+    } catch (err) {
+      await fs.collection('vehicles').doc(String(vehicle.id)).delete().catch(() => {});
+      throw err;
+    }
+    const { vehicle: updated, device } = applied;
     await mirrorVehicles([updated]);
     if (device) await mirrorDevice(device);
 

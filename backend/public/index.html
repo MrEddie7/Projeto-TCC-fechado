@@ -429,6 +429,8 @@ const state = {
   // Última visão geral recebida, indexada por id: o modal da chave lê o device
   // (com apiKey) daqui, sem precisar de outra chamada de rede.
   overviewVehicles: {},
+  // O servidor está com a simulação habilitada? (SIMULATION_ENABLED)
+  simulationAvailable: true,
   // Sessão Firebase: o idToken expira em 1 h. Guardamos o refreshToken do login
   // para renovar automaticamente e evitar 401 em sessões longas.
   refreshToken: null, tokenExpiresAt: 0, tokenRefreshTimer: null, refreshing: false,
@@ -549,6 +551,19 @@ function renderOverview(o) {
   const c = o.counts || {};
   const s = o.service || {};
   const sync = o.sync || {};
+
+  // Simulação desligada no servidor (por exemplo na Vercel, onde a API não
+  // sobe processos): o botão de criar veículo simulado não teria efeito — a
+  // API responde 409 — então fica desabilitado e diz o motivo no title.
+  const simOn = c.simulationAvailable !== false;
+  state.simulationAvailable = simOn;
+  const newSim = $('btnNewSim');
+  if (newSim) {
+    newSim.disabled = !simOn;
+    newSim.title = simOn
+      ? 'Cria um veículo novo já com rastreador virtual e mostra a chave da API'
+      : 'Simulação desativada no servidor (SIMULATION_ENABLED=false)';
+  }
 
   $('stApi').textContent = s.version ? 'v' + s.version : 'online';
   $('stApiSub').textContent = `${s.node || 'node'} · uptime ${fmtUptime(s.uptimeSeconds)}`;
@@ -706,6 +721,10 @@ function showKey(vehicle, device) {
 
 // Cria um veículo novo já na frota simulada (o app só cria veículos sem device).
 function openNewSimulatedVehicle() {
+  if (state.simulationAvailable === false) {
+    alert('Simulação desativada no servidor (SIMULATION_ENABLED=false).');
+    return;
+  }
   openModal('Novo veículo na simulação', `
     <form class="sim-form" id="newSimForm" autocomplete="off">
       <label>Placa <input name="plate" placeholder="ABC1D23" maxlength="8" required></label>
