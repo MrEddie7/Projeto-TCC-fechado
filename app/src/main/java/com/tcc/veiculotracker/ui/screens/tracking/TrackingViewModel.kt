@@ -35,7 +35,10 @@ data class TrackingState(
     val mapFocusTarget: MapFocusTarget = MapFocusTarget.VEHICLE,
     // ── Bloqueio do veículo (botão movido para cá, ver RemoteControl) ──
     val isBlocking: Boolean = false,
-    val commandMessage: String? = null
+    /** Resultado do último comando (sucesso, falha do POST ou ACK pendente). */
+    val commandMessage: String? = null,
+    /** true = o comando NÃO saiu; a mensagem é um erro. */
+    val commandFailed: Boolean = false
 )
 
 class TrackingViewModel(application: Application) : AndroidViewModel(application) {
@@ -332,15 +335,27 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
 
     private fun sendBlockCommand(blocked: Boolean) {
         val vehicle = _state.value.selectedVehicle ?: return
+        if (_state.value.isBlocking) return
         viewModelScope.launch {
-            _state.value = _state.value.copy(isBlocking = true, error = null)
-            try {
-                vehicleRepository.setBlocked(vehicle.id, blocked, vehicle)
-                dispatchCommand(vehicle.id, if (blocked) "block" else "unblock")
-            } catch (e: Exception) {
+            _state.value = _state.value.copy(
+                isBlocking = true,
+                error = null,
+                commandMessage = null,
+                commandFailed = false
+            )
+            // O POST é o primeiro passo (e o único que coloca o comando na
+            // fila do rastreador). Antes havia um PUT de cadastro antes dele:
+            // a API ignora `isBlocked` nesse PUT, então ele não bloqueava
+            // nada — e, se a requisição travasse, o POST nunca era enviado.
+            val sent = dispatchCommand(vehicle, blocked)
+            val failure = sent.exceptionOrNull()
+            if (failure != null) {
+                val acao = if (blocked) "bloquear" else "desbloquear"
                 _state.value = _state.value.copy(
                     isBlocking = false,
-                    error = if (blocked) "Erro ao bloquear veículo" else "Erro ao desbloquear veículo"
+                    commandFailed = true,
+                    commandMessage = failure.message?.takeIf { it.isNotBlank() }
+                        ?: "Não foi possível $acao o veículo (falha de rede ao chamar a API)."
                 )
                 return@launch
             }
@@ -348,11 +363,15 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             // a API ignora `isBlocked` no PUT de propósito. Fica aguardando a
             // confirmação para só então liberar o botão.
             val confirmed = awaitBlockedState(vehicle.id, blocked)
+            val acao = if (blocked) "bloqueio" else "desbloqueio"
             _state.value = _state.value.copy(
                 isBlocking = false,
+                commandFailed = false,
                 commandMessage = when {
                     confirmed -> if (blocked) "Veículo bloqueado" else "Veículo desbloqueado"
-                    else -> "Comando enviado. Aguardando o rastreador confirmar."
+                    else -> "Comando de $acao na fila, mas nenhum rastreador confirmou em " +
+                        "${ACK_TIMEOUT_MS / 1000}s. Confira se o veículo tem rastreador ou " +
+                        "simulador ativo."
                 }
             )
         }
@@ -379,18 +398,25 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
      *    (`POST /v1/vehicles/:id/commands`), consumida e confirmada pelo
      *    rastreador — inclusive os veículos simulados pelo próprio backend;
      *  - sem backend, cai para o Realtime Database (modo offline do app).
+     * Devolve o erro em vez de lançar: a tela mostra a causa real da falha.
      */
-    private suspend fun dispatchCommand(vehicleId: Long, command: String) {
+    private suspend fun dispatchCommand(vehicle: VehicleModel, blocked: Boolean): Result<Unit> {
+        val command = if (blocked) "block" else "unblock"
         val backend = syncManager.backendRepository
         if (backend != null && backend.isConfigured) {
-            syncManager.sendCommandToBackend(vehicleId, command).getOrThrow()
-        } else {
-            syncManager.sendCommand(vehicleId, command)
+            // `map { }` preserva a mensagem que a API devolveu (401/403/409),
+            // que é o que o usuário precisa ver na tela.
+            return syncManager.sendCommandToBackend(vehicle.id, command).map { }
         }
+        // Sem backend: canal direto no RTDB + espelho do estado no Firestore.
+        val sent = syncManager.sendCommand(vehicle.id, command)
+        if (sent.isSuccess) vehicleRepository.setBlockedOffline(vehicle, blocked)
+        return sent
     }
 
+    /** O usuário dispensou o aviso do comando (banner/ snackbar). */
     fun clearCommandMessage() {
-        _state.value = _state.value.copy(commandMessage = null)
+        _state.value = _state.value.copy(commandMessage = null, commandFailed = false)
     }
 
     private fun hasLocationPermission(): Boolean {

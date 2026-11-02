@@ -57,11 +57,15 @@ fun TrackingScreen(
         }
     }
 
-    // Confirmação do comando de bloqueio/desbloqueio.
+    // Resultado do comando de bloqueio/desbloqueio: falha do POST ou ACK
+    // pendente. O aviso também fica fixo no cartão, porque um snackbar curto
+    // some antes de o usuário ler a causa enviada pela API.
     LaunchedEffect(state.commandMessage) {
         state.commandMessage?.let {
-            snackbarHostState.showSnackbar(it)
-            viewModel.clearCommandMessage()
+            snackbarHostState.showSnackbar(
+                message = it,
+                duration = if (state.commandFailed) SnackbarDuration.Long else SnackbarDuration.Short
+            )
         }
     }
 
@@ -224,6 +228,55 @@ fun TrackingScreen(
                                         else -> "Bloquear"
                                     }
                                 )
+                            }
+                        }
+
+                        // Retorno do comando: erro do POST (vermelho) ou
+                        // confirmação/aguardando o rastreador (neutro).
+                        state.commandMessage?.let { message ->
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = MaterialTheme.shapes.small,
+                                color = if (state.commandFailed) {
+                                    MaterialTheme.colorScheme.errorContainer
+                                } else {
+                                    MaterialTheme.colorScheme.secondaryContainer
+                                }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = if (state.commandFailed) Icons.Default.ErrorOutline else Icons.Default.Info,
+                                        contentDescription = null,
+                                        tint = if (state.commandFailed) {
+                                            MaterialTheme.colorScheme.onErrorContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.onSecondaryContainer
+                                        },
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = message,
+                                        modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (state.commandFailed) {
+                                            MaterialTheme.colorScheme.onErrorContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.onSecondaryContainer
+                                        }
+                                    )
+                                    IconButton(onClick = viewModel::clearCommandMessage) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "Fechar aviso",
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

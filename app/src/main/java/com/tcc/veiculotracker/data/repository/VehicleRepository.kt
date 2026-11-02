@@ -76,28 +76,17 @@ class VehicleRepository(
     }
 
     /**
-     * Bloqueio/desbloqueio. A mudança de estado é feita pelo hardware (ACK do
-     * comando); aqui só refletimos no Firestore quando não há backend, para o
-     * app não gravar estado que o servidor acabaria sobrescrevendo.
+     * Espelho local do bloqueio, usado SÓ no modo sem backend (comando enviado
+     * pelo Realtime Database), para a tela refletir o clique.
+     *
+     * Com backend configurado o app não grava `isBlocked`: a rota
+     * `PUT /v1/vehicles/:id` ignora esse campo de propósito (só cadastro muda
+     * por PUT) e o estado final é escrito pelo rastreador no ACK do comando.
+     * O PUT que existia aqui rodava antes do POST do comando e, se travasse,
+     * o comando de bloquear nem era enviado.
      */
-    suspend fun setBlocked(vehicleId: Long, blocked: Boolean, vehicle: VehicleModel) {
-        val updated = vehicle.copy(isBlocked = blocked)
-        val backend = syncManager.backendRepository
-        if (backend != null && backend.isConfigured) {
-            runCatching {
-                backend.updateVehicle(vehicleId, mapOf(
-                    "plate"     to vehicle.plate,
-                    "model"     to vehicle.model,
-                    "brand"     to vehicle.brand,
-                    "year"      to vehicle.year,
-                    "color"     to vehicle.color,
-                    "isBlocked" to blocked
-                ))
-            }
-            return
-        }
-        runCatching { syncManager.syncVehicle(updated) }
-    }
+    suspend fun setBlockedOffline(vehicle: VehicleModel, blocked: Boolean): Result<Unit> =
+        runCatching { syncManager.syncVehicle(vehicle.copy(isBlocked = blocked)) }
 
     /**
      * Atualização de posição vinda de um observer. NÃO grava no Firestore: a

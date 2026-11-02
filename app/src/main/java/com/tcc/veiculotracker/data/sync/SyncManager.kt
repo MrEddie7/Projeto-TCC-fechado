@@ -119,9 +119,13 @@ class SyncManager(
 
     // ── Comandos (Realtime Database) ──────────────────────────────────────────
 
-    suspend fun sendCommand(vehicleId: Long, command: String) {
+    /**
+     * Comando pelo Realtime Database (modo sem backend). Devolve o erro em vez
+     * de engoli-lo: é o único caminho quando não há API, e a tela precisa
+     * dizer ao usuário que o comando não saiu.
+     */
+    suspend fun sendCommand(vehicleId: Long, command: String): Result<Unit> =
         runCatching { firebaseDataSource.sendCommand(vehicleId.toString(), command) }
-    }
 
     fun listenCommandResponse(vehicleId: Long): Flow<FirebaseDataSource.RemoteCommand> =
         firebaseDataSource.listenCommandResponse(vehicleId.toString())
