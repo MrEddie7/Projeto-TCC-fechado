@@ -12,7 +12,8 @@ import { asyncHandler } from '../middleware/error.js';
 import { HttpError } from '../util/http-error.js';
 import { serializeVehicle, serializeDevice } from './vehicles.routes.js';
 import { subscribeVehicle, publishToVehicle } from '../realtime/sse.js';
-import { firestore } from '../services/firestore-store.js';
+import { firestore, makeId } from '../services/firestore-store.js';
+import { mirrorVehicles, mirrorDevice } from '../services/vehicle-cache.js';
 import {
   buildOverview,
   listAllVehicles,
@@ -204,6 +205,66 @@ router.post(
       simulation: getSimulationDecision(updated, device),
       vehicle: { ...serializeVehicle(updated), simulated: Boolean(device && device.model === 'server-sim') },
       device: serializeDevice(device),
+    });
+  })
+);
+
+// ── Simulação: criar um veículo novo já com rastreador virtual ──────────
+//
+// O botão "Simular" só consegue agir em veículo que já existe (o app cria os
+// veículos sem device). Esta rota cria o veículo direto na frota simulada e
+// devolve o device COM a apiKey — é a chave que permite rodar o
+// hardware-simulator local apontando para esta API.
+const PLATE = /^[A-Z]{3}\d[A-Z0-9]\d{2}$|^[A-Z]{3}-\d{4}$/;
+
+router.post(
+  '/simulation/vehicles',
+  asyncHandler(async (req, res) => {
+    const { plate, model, brand, year, color = '' } = req.body || {};
+    const normalized = String(plate || '').trim().toUpperCase().replace(/\s+/g, '');
+    if (!model || !brand || !PLATE.test(normalized)) {
+      throw new HttpError(400, 'Informe placa (ABC1D23 ou ABC-1234), modelo e marca');
+    }
+
+    const fs = firestore();
+    const duplicate = await fs
+      .collection('vehicles')
+      .where('ownerUid', '==', req.user.uid)
+      .where('plate', '==', normalized)
+      .limit(1)
+      .get();
+    if (!duplicate.empty) throw new HttpError(409, `Você já tem um veículo com a placa ${normalized}`);
+
+    const now = Date.now();
+    const vehicle = {
+      id: makeId(),
+      userId: req.user.uid,
+      ownerUid: req.user.uid,
+      plate: normalized,
+      model: String(model),
+      brand: String(brand),
+      year: Number(year) || 0,
+      color: String(color),
+      isBlocked: false,
+      latitude: 0,
+      longitude: 0,
+      speed: 0,
+      lastUpdate: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await fs.collection('vehicles').doc(String(vehicle.id)).set(vehicle);
+
+    // applySimulationDecision cria o device server-sim (com apiKey) e, quando a
+    // API roda local, sobe o simulador desse rastreador.
+    const { vehicle: updated, device } = await applySimulationDecision(vehicle, true);
+    await mirrorVehicles([updated]);
+    if (device) await mirrorDevice(device);
+
+    res.status(201).json({
+      vehicle: { ...serializeVehicle(updated), simulated: true },
+      device: serializeDevice(device),
+      simulation: getSimulationDecision(updated, device),
     });
   })
 );

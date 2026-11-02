@@ -76,15 +76,23 @@
   .card.accent { border-color: rgba(76,141,255,.4); background: linear-gradient(180deg, rgba(76,141,255,.10), transparent); }
   .card.warnv .v { color: var(--warn); }
 
-  .layout { display: grid; grid-template-columns: minmax(320px, 430px) 1fr; gap: 14px; align-items: start; }
+  /* Duas colunas proporcionais: a barra lateral fixa de 430px espremia as
+     listas (placa + badges + chave) enquanto sobrava espaço no painel da
+     direita. Com fração, a divisão acompanha a largura da tela. */
+  .layout { display: grid; grid-template-columns: minmax(340px, 0.95fr) minmax(0, 1.05fr); gap: 14px; align-items: start; }
   .col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
   .panel > .head {
-    display: flex; align-items: center; gap: 10px;
+    /* wrap sempre: título + botões + chip não cabem numa linha só em
+       colunas de ~360px e estouravam para fora do cartão. */
+    display: flex; align-items: center; gap: 8px; row-gap: 6px; flex-wrap: wrap;
     padding: 9px 13px; background: var(--panel2); border-bottom: 1px solid var(--line);
   }
-  .panel > .head h2 { font-size: 12px; margin: 0; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
+  .panel > .head h2 {
+    font-size: 12px; margin: 0; text-transform: uppercase; letter-spacing: .8px;
+    color: var(--muted); min-width: 0;
+  }
   .panel > .head .meta { font-size: 12px; color: var(--muted); font-family: ui-monospace, monospace; }
   .panel .body { padding: 12px 13px; }
   .panel .body.tight { padding: 8px; }
@@ -121,7 +129,7 @@
   }
   .vehicle .plate { font-family: ui-monospace, monospace; font-weight: 700; letter-spacing: .5px; }
   .vehicle .model { color: var(--muted); font-size: 12px; }
-  .vehicle .right { text-align: right; font-size: 11.5px; color: var(--muted); }
+  .vehicle .right { text-align: right; font-size: 11.5px; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
   .badge { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); margin-left: 6px; }
   .badge.on { color: var(--ok); border-color: rgba(62,207,142,.4); }
   .badge.off { color: var(--muted); }
@@ -130,8 +138,52 @@
   .badge.real { color: var(--info); border-color: rgba(76,141,255,.45); }
   .badge.phone { color: #6ee7ff; border-color: rgba(110,231,255,.5); }
 
-  button.small { padding: 3px 8px; font-size: 11.5px; border-radius: 6px; }
+  button.small { padding: 3px 8px; font-size: 11.5px; border-radius: 6px; white-space: nowrap; }
   .sim-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; flex-wrap: wrap; }
+
+  /* Modal (chave do rastreador virtual / novo veículo simulado). */
+  .modal {
+    position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center;
+    justify-content: center; padding: 16px; background: rgba(8,10,14,.72);
+  }
+  .modal[hidden] { display: none; }
+  .modal-box {
+    width: min(680px, 100%); max-height: calc(100dvh - 32px); overflow: auto;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: 0 18px 50px rgba(0,0,0,.45);
+  }
+  .modal-head {
+    display: flex; align-items: center; gap: 10px; padding: 10px 13px;
+    border-bottom: 1px solid var(--line); background: var(--panel2);
+  }
+  .modal-head h2 {
+    flex: 1; min-width: 0; margin: 0; font-size: 12px; text-transform: uppercase;
+    letter-spacing: .8px; color: var(--muted);
+  }
+  .modal-body { padding: 13px; display: grid; gap: 12px; }
+  .key-grid { display: grid; gap: 8px; }
+  .key-row { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+  .key-row .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); }
+  .key-row code {
+    font-family: ui-monospace, monospace; font-size: 12px; background: var(--input);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+    overflow-wrap: anywhere; word-break: break-all;
+  }
+  .hint { font-size: 11.5px; color: var(--muted); margin: 0; }
+  .sim-form { display: grid; gap: 10px; }
+  .sim-form label { display: grid; gap: 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+  .sim-form input { font-size: 13px; }
+  .sim-form-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  .sim-form .msg { padding: 0; color: var(--err); font-size: 12px; }
+
+  @media (max-width: 560px) {
+    .key-row { grid-template-columns: minmax(0, 1fr) auto; }
+    .key-row .k { grid-column: 1 / -1; }
+    .modal { padding: 8px; align-items: flex-start; }
+    .modal-box { max-height: calc(100dvh - 16px); }
+    .sim-form-actions { justify-content: stretch; }
+    .sim-form-actions button { flex: 1 1 auto; }
+  }
 
   .cloud-row {
     display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px;
@@ -140,7 +192,7 @@
   }
   .cloud-row:last-child { border-bottom: 0; }
   .cloud-row b { font-family: ui-monospace, monospace; }
-  .cloud-row .sub { color: var(--muted); font-size: 11.5px; }
+  .cloud-row .sub { color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
 
   #map { height: clamp(280px, 45vh, 460px); width: 100%; background: var(--mapbg); }
   .hud {
@@ -171,8 +223,15 @@
   #logs .empty, .msg { padding: 18px 13px; color: var(--muted); }
   .empty-state { padding: 18px 13px; color: var(--muted); }
 
-  @media (max-width: 1050px) {
-    .layout { grid-template-columns: 1fr; }
+  /* Abaixo de 1024px as duas colunas ficam estreitas demais para placa +
+     badges + botões de chave: empilha em uma coluna só. */
+  @media (max-width: 1024px) {
+    .layout { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  @media (max-width: 640px) {
+    .card .v { font-size: 20px; }
+    .stats { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); }
   }
   @media (max-width: 640px) {
     .screens { grid-template-columns: 1fr; }
@@ -254,6 +313,7 @@
         <div class="head">
           <h2>Enviados pelo celular (Firestore)</h2>
           <div class="spacer"></div>
+          <button type="button" class="small primary" id="btnNewSim" title="Cria um veículo novo já com rastreador virtual e mostra a chave da API">+ Simulado</button>
           <button type="button" class="small" id="btnImportCloud">Sincronizar do celular</button>
           <button type="button" class="small" id="btnSyncFirebase">Sincronizar Firebase</button>
           <span class="chip" id="chipCloud"><span class="dot"></span><span>—</span></span>
@@ -340,6 +400,19 @@
   </div>
 </main>
 
+<!-- Modal: chave do rastreador virtual e criação de veículo simulado.
+     Um único overlay, com o conteúdo montado por openModal() — assim o painel
+     não precisa de duas cópias de markup quase igual. -->
+<div class="modal" id="modal" hidden>
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-head">
+      <h2 id="modalTitle">—</h2>
+      <button type="button" class="small" id="modalClose" aria-label="Fechar">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
@@ -353,6 +426,9 @@ const state = {
   lastSeq: 0, logStream: null, telStream: null, refreshTimer: null, vehiclesById: {},
   // Simulação do veículo selecionado (alimenta o botão "Simular" do HUD).
   vehicleSimulated: false, vehicleHasDevice: false, vehicleSimulation: null,
+  // Última visão geral recebida, indexada por id: o modal da chave lê o device
+  // (com apiKey) daqui, sem precisar de outra chamada de rede.
+  overviewVehicles: {},
   // Sessão Firebase: o idToken expira em 1 h. Guardamos o refreshToken do login
   // para renovar automaticamente e evitar 401 em sessões longas.
   refreshToken: null, tokenExpiresAt: 0, tokenRefreshTimer: null, refreshing: false,
@@ -518,6 +594,9 @@ function renderOverview(o) {
     .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`)
     .join('');
 
+  state.overviewVehicles = {};
+  for (const v of o.vehicles || []) state.overviewVehicles[Number(v.id)] = v;
+
   renderUsers(o.users || []);
   renderScreens(o.screens || []);
   // Mapa: guarda a última posição do celular por usuário, para exibir o
@@ -552,9 +631,128 @@ function simToggleButton(v) {
   const title = sim.reason || (v.simulated
     ? 'Remove o rastreador virtual deste veículo'
     : 'Cria um rastreador virtual que movimenta o veículo');
-  return '<div class="sim-actions">' +
+  // Veículo simulado tem device virtual com apiKey: é o que permite rodar o
+  // hardware-simulator fora do painel. O botão mostra device + chave.
+  const keyBtn = v.simulated && v.device && v.device.apiKey
+    ? `<button type="button" class="small key-btn" data-key-id="${Number(v.id)}" ` +
+      `title="Device e chave de API do rastreador virtual">Chave</button>`
+    : '';
+  return '<div class="sim-actions">' + keyBtn +
     `<button type="button" class="small sim-toggle" data-sim-id="${Number(v.id)}" ` +
     `data-sim-next="${next}" title="${esc(title)}">${label}</button></div>`;
+}
+
+// ── Modal (chave da API / novo veículo simulado) ───────────────
+function openModal(title, html) {
+  $('modalTitle').textContent = title;
+  $('modalBody').innerHTML = html;
+  $('modal').hidden = false;
+  const focus = $('modalBody').querySelector('input, button');
+  if (focus) focus.focus();
+}
+
+function closeModal() {
+  $('modal').hidden = true;
+  $('modalBody').innerHTML = '';
+}
+
+async function copyText(text, btn) {
+  const original = btn.textContent;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      // http:// na rede local não é contexto seguro: cópia pelo textarea.
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+    btn.textContent = 'copiado!';
+  } catch {
+    btn.textContent = 'falhou';
+  }
+  setTimeout(() => { btn.textContent = original; }, 1400);
+}
+
+// Mostra device + apiKey do rastreador virtual e o comando pronto do simulador.
+function showKey(vehicle, device) {
+  const v = vehicle || {};
+  const d = device || v.device || {};
+  if (!d.apiKey) {
+    alert('Este veículo ainda não tem rastreador virtual. Use "Simular" primeiro.');
+    return;
+  }
+  const cmd = `VTSIM_DEVICE_ID=${d.deviceId} VTSIM_API_KEY=${d.apiKey} npm run simulator`;
+  openModal(`Rastreador virtual · ${v.plate || d.deviceId}`, `
+    <div class="key-grid">
+      <div class="key-row"><span class="k">Veículo</span><code>${esc(v.plate || '—')}</code><span></span></div>
+      <div class="key-row"><span class="k">Device</span><code>${esc(d.deviceId)}</code>
+        <button type="button" class="small" data-copy="${esc(d.deviceId)}">copiar</button></div>
+      <div class="key-row"><span class="k">API key</span><code>${esc(d.apiKey)}</code>
+        <button type="button" class="small" data-copy="${esc(d.apiKey)}">copiar</button></div>
+      <div class="key-row"><span class="k">Comando</span><code>${esc(cmd)}</code>
+        <button type="button" class="small" data-copy="${esc(cmd)}">copiar</button></div>
+    </div>
+    <p class="hint">Rode no backend com essas variáveis: o rastreador passa a enviar
+    telemetria e a confirmar bloqueio/desbloqueio. A Vercel não sobe processos —
+    o simulador roda na sua máquina.</p>
+  `);
+}
+
+// Cria um veículo novo já na frota simulada (o app só cria veículos sem device).
+function openNewSimulatedVehicle() {
+  openModal('Novo veículo na simulação', `
+    <form class="sim-form" id="newSimForm" autocomplete="off">
+      <label>Placa <input name="plate" placeholder="ABC1D23" maxlength="8" required></label>
+      <label>Marca <input name="brand" placeholder="Honda" maxlength="24" required></label>
+      <label>Modelo <input name="model" placeholder="CG 160" maxlength="40" required></label>
+      <label>Ano <input name="year" type="number" min="1950" max="2100" placeholder="2024"></label>
+      <label>Cor <input name="color" placeholder="Vermelha" maxlength="20"></label>
+      <div class="sim-form-actions">
+        <button type="button" class="small" id="btnCancelNewSim">Cancelar</button>
+        <button type="submit" class="small primary" id="btnCreateSim">Criar e gerar chave</button>
+      </div>
+      <div class="msg" id="newSimMsg" hidden></div>
+    </form>
+  `);
+  $('btnCancelNewSim').addEventListener('click', closeModal);
+  $('newSimForm').addEventListener('submit', createSimulatedVehicle);
+}
+
+async function createSimulatedVehicle(ev) {
+  ev.preventDefault();
+  const btn = $('btnCreateSim');
+  const msg = $('newSimMsg');
+  const data = new FormData(ev.currentTarget);
+  const body = {
+    plate: String(data.get('plate') || '').trim(),
+    brand: String(data.get('brand') || '').trim(),
+    model: String(data.get('model') || '').trim(),
+    year: Number(data.get('year')) || 0,
+    color: String(data.get('color') || '').trim(),
+  };
+  btn.disabled = true;
+  btn.textContent = 'Criando…';
+  msg.hidden = true;
+  try {
+    const res = await api('/v1/admin/simulation/vehicles', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(res.data?.error || `HTTP ${res.status}`);
+    await refreshOverview();
+    showKey(res.data.vehicle, res.data.device);
+  } catch (err) {
+    msg.hidden = false;
+    msg.textContent = 'Erro: ' + err.message;
+    btn.disabled = false;
+    btn.textContent = 'Criar e gerar chave';
+  }
 }
 
 // Põe/tira o veículo da simulação e relê a visão geral (o device e o estado do
@@ -581,10 +779,30 @@ async function toggleSimulation(btn) {
 }
 
 document.addEventListener('click', (ev) => {
-  const btn = ev.target && ev.target.closest ? ev.target.closest('.sim-toggle') : null;
-  if (!btn) return;
-  ev.preventDefault();
-  toggleSimulation(btn);
+  const el = ev.target;
+  if (!el || !el.closest) return;
+
+  // Botão "copiar" dos campos de chave.
+  const copy = el.closest('[data-copy]');
+  if (copy) {
+    ev.preventDefault();
+    copyText(copy.dataset.copy, copy);
+    return;
+  }
+
+  // "Chave": abre o modal com device + apiKey do rastreador virtual.
+  const key = el.closest('.key-btn');
+  if (key) {
+    ev.preventDefault();
+    showKey(state.overviewVehicles[Number(key.dataset.keyId)]);
+    return;
+  }
+
+  const sim = el.closest('.sim-toggle');
+  if (sim) {
+    ev.preventDefault();
+    toggleSimulation(sim);
+  }
 });
 
 function renderUsers(users) {
@@ -1043,6 +1261,16 @@ $('btnSim').addEventListener('click', async () => {
     btn.dataset.pending = '0';
     updateSimButton();
   }
+});
+
+// Modal: abrir o formulário de veículo simulado e fechar de três jeitos.
+$('btnNewSim').addEventListener('click', openNewSimulatedVehicle);
+$('modalClose').addEventListener('click', closeModal);
+$('modal').addEventListener('click', (ev) => {
+  if (ev.target === $('modal')) closeModal(); // clique no fundo
+});
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && !$('modal').hidden) closeModal();
 });
 
 // ── Streams ──────────────────────────────────────────────────────────────
