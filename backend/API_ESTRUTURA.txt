@@ -181,8 +181,13 @@
         acaba (ver seção "Cota do Firestore").
 
    devices_mirror/{deviceId}  { deviceId, vehicleId, model, firmware,
-                                lastSeen, createdAt }
-     -> espelho dos rastreadores, SEM a apiKey (credencial do hardware).
+                                lastSeen, createdAt, apiKey? }
+     -> espelho dos rastreadores. A apiKey só é guardada para devices
+        com model='server-sim' (rastreador virtual), porque o administrador
+        precisa copiar o comando do simulador mesmo quando a cota do
+        Firestore esgota. Nos rastreadores reais (ESP32) a apiKey continua
+        fora do espelho. O nó não tem regra de leitura no RTDB: só o backend
+        (Admin SDK) acessa.
 
 
 ================================================================================

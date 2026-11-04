@@ -15,6 +15,7 @@ import { firestore, rtdb, makeId } from './firestore-store.js';
 import { publishToVehicle } from '../realtime/sse.js';
 import { getFirebase } from '../firebase/firebase-admin.js';
 import { rememberDevice } from './device-key-cache.js';
+import { cachedVehicle } from './vehicle-cache.js';
 import { startSimulatedDevice, stopSimulatedDevice, simulationRunnerAvailable } from './simulation-fleet.js';
 
 export const SERVER_SIM_MODEL = 'server-sim';
@@ -267,8 +268,19 @@ export async function setVehiclePosition(vehicleId, { latitude, longitude, speed
 
   const db = firestore();
   const vehicleRef = db.collection('vehicles').doc(String(vId));
-  const snap = await vehicleRef.get();
-  if (!snap.exists) throw new HttpError(404, 'Veículo não encontrado');
+  // A cota do Firestore pode estar esgotada justamente quando o administrador
+  // arrasta o veículo no mapa. A posição manual é publicada no RTDB, que é o
+  // canal lido pelo simulador; o documento do Firestore é secundário.
+  let current = null;
+  try {
+    const snap = await vehicleRef.get();
+    if (!snap.exists) throw new HttpError(404, 'Veículo não encontrado');
+    current = snap.data();
+  } catch (e) {
+    if (!isQuotaError(e)) throw e;
+    current = await cachedVehicle(vId).catch(() => null);
+    if (!current) throw new HttpError(503, 'Cota do Firestore esgotada e veículo sem espelho no RTDB');
+  }
 
   const point = {
     id: makeId(),
@@ -276,23 +288,33 @@ export async function setVehiclePosition(vehicleId, { latitude, longitude, speed
     latitude: lat,
     longitude: lng,
     speed: spd,
-    heading: Number(snap.data().heading || 0),
-    battery: snap.data().battery ?? null,
+    heading: Number(current.heading || 0),
+    battery: current.battery ?? null,
     timestamp: now,
     source: 'manual',
   };
 
-  await db.collection('telemetry').doc(String(point.id)).set(point);
-  await vehicleRef.set(
-    { latitude: lat, longitude: lng, speed: spd, lastUpdate: now, updatedAt: now },
-    { merge: true }
-  );
+  try {
+    await db.collection('telemetry').doc(String(point.id)).set(point);
+    await vehicleRef.set(
+      { latitude: lat, longitude: lng, speed: spd, lastUpdate: now, updatedAt: now },
+      { merge: true }
+    );
+  } catch (e) {
+    if (!isQuotaError(e)) throw e;
+    console.warn('[sim] cota do Firestore esgotada: posição manual gravada só no RTDB');
+  }
   await rtdb().ref(`telemetry/${vId}`).set(point);
   // Carimbo que o simulador observa para reancorar nesta posição.
   await rtdb().ref(`sim_control/${vId}`).set({ latitude: lat, longitude: lng, updatedAt: now });
   publishToVehicle(vId, 'telemetry', point);
 
-  const updated = (await vehicleRef.get()).data();
+  let updated = { ...current, ...point, lastUpdate: now, updatedAt: now };
+  try {
+    updated = (await vehicleRef.get()).data() || updated;
+  } catch (e) {
+    if (!isQuotaError(e)) throw e;
+  }
   return { vehicle: updated, point };
 }
 

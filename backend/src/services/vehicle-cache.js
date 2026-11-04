@@ -18,7 +18,7 @@ const rtdb = () => getFirebase().rtdb;
 const publicDevice = (d) => {
   if (!d) return null;
   const { apiKey, ...pub } = d;
-  return {
+  const out = {
     id: d.deviceId,
     deviceId: d.deviceId,
     vehicleId: Number(d.vehicleId),
@@ -27,6 +27,12 @@ const publicDevice = (d) => {
     lastSeen: Number(d.lastSeen || 0),
     createdAt: Number(d.createdAt || 0),
   };
+  // Rastreador virtual: a chave é necessária para o administrador copiar o
+  // comando do simulador quando a cota do Firestore esgota (o painel passa a
+  // ler o espelho). O nó devices_mirror não tem regra de leitura no RTDB, então
+  // só o backend (Admin SDK) o acessa. Em devices reais a chave continua fora.
+  if (d.model === 'server-sim' && d.apiKey) out.apiKey = d.apiKey;
+  return out;
 };
 
 export async function mirrorVehicles(vehicles) {
@@ -68,4 +74,10 @@ export async function cachedDevice(vehicleId) {
   const snap = await rtdb().ref(DEVICES).get();
   const all = snap.val() || {};
   return Object.values(all).find((d) => d && Number(d.vehicleId) === Number(vehicleId)) || null;
+}
+
+/** Device do espelho pelo próprio deviceId (usado na autenticação do hardware). */
+export async function cachedDeviceById(deviceId) {
+  const snap = await rtdb().ref(`${DEVICES}/${deviceId}`).get();
+  return snap.val() || null;
 }

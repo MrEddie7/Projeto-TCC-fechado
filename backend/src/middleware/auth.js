@@ -1,5 +1,6 @@
 import { getFirebase } from '../firebase/firebase-admin.js';
 import { knownDevice } from '../services/device-key-cache.js';
+import { cachedDeviceById } from '../services/vehicle-cache.js';
 import { isQuotaError } from '../util/firestore-errors.js';
 
 // O app consulta a API a cada poucos segundos; gravar o documento do usuário
@@ -58,8 +59,9 @@ export async function requireDevice(req, res, next) {
   } catch (e) {
     if (!isQuotaError(e)) throw e;
     // Cota de leitura esgotada: a credencial continua válida se estiver no
-    // cache local do servidor (gravado quando o device foi provisionado).
-    device = knownDevice(deviceId);
+    // cache local do servidor (gravado quando o device foi provisionado) ou no
+    // espelho do RTDB. O espelho guarda a apiKey apenas de devices server-sim.
+    device = knownDevice(deviceId) || (await cachedDeviceById(deviceId).catch(() => null));
   }
   if (!device || device.apiKey !== apiKey) {
     return res.status(403).json({ error: 'Dispositivo não autorizado' });
