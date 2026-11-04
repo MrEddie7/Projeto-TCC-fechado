@@ -233,4 +233,8 @@ O painel mostra o estado real de cada simulador pelo último contato do device
 O bloqueio só é confirmado pelo ACK do rastreador/simulador; enquanto isso o
 comando aparece como pendente, em vez de fingir que o veículo já foi bloqueado.
 
+O comando copiado usa a URL pública configurada em `PUBLIC_API_URL` (ou o
+domínio da Vercel) e nunca `localhost`. A API também devolve o campo
+`simulatorCommand` pronto nas rotas administrativas.
+
 ================================================================================

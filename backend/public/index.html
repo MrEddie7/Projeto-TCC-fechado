@@ -461,6 +461,11 @@
 'use strict';
 
 const BASE = location.origin;
+// O comando do simulador NUNCA deve apontar para localhost: quem copia roda em
+// outra máquina. A URL pública vem da API (`publicApiUrl`); este fallback cobre
+// o painel aberto em localhost antes da primeira resposta da API.
+const IS_LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(location.hostname);
+const FALLBACK_PUBLIC_API = 'https://projeto-tcc-fechado-public.vercel.app';
 const $ = (id) => document.getElementById(id);
 $('base').textContent = BASE;
 
@@ -478,6 +483,8 @@ const state = {
   simulationAvailable: true,
   // A API consegue manter processos de simulador? (false na Vercel)
   runnerAvailable: true,
+  // URL pública informada pela API para montar o comando do simulador.
+  publicApiUrl: '',
   // Sessão Firebase: o idToken expira em 1 h. Guardamos o refreshToken do login
   // para renovar automaticamente e evitar 401 em sessões longas.
   refreshToken: null, tokenExpiresAt: 0, tokenRefreshTimer: null, refreshing: false,
@@ -625,6 +632,7 @@ function renderOverview(o) {
   const simOn = c.simulationAvailable !== false;
   state.simulationAvailable = simOn;
   state.runnerAvailable = c.runnerAvailable !== false;
+  state.publicApiUrl = o.publicApiUrl || '';
   const simTitle = simOn
     ? 'Cria um veículo novo já com rastreador virtual e mostra a chave da API'
     : 'Simulação desativada no servidor (SIMULATION_ENABLED=false)';
@@ -781,7 +789,7 @@ function showKey(vehicle, device) {
     alert('Este veículo ainda não tem rastreador virtual. Use "Simular" primeiro.');
     return;
   }
-  const cmd = `VTSIM_DEVICE_ID=${d.deviceId} VTSIM_API_KEY=${d.apiKey} VTSIM_API_URL=${BASE} npm run simulator`;
+  const cmd = v.simulatorCommand || simulatorCommand(d);
   openModal(`Rastreador virtual · ${v.plate || d.deviceId}`, `
     <div class="key-grid">
       <div class="key-row"><span class="k">Veículo</span><code>${esc(v.plate || '—')}</code><span></span></div>
@@ -1029,11 +1037,23 @@ function renderPhoneVehicles(o) {
 // ── Aba Simulador (painel) ────────────────────────────────────────────────
 
 /** Comando pronto para rodar o hardware-simulator apontando para esta API. */
+/**
+ * URL usada no comando copiado. Prioriza a URL pública devolvida pela API
+ * (`publicApiUrl`), ignora localhost e, no painel local sem configuração, cai
+ * na produção conhecida — nunca gera `VTSIM_API_URL=http://localhost:3000`.
+ */
+function simulatorBaseUrl() {
+  const configured = String(state.publicApiUrl || '').trim().replace(/\/+$/, '');
+  const isLocalUrl = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/i.test(configured);
+  if (/^https?:\/\//i.test(configured) && !isLocalUrl) return configured;
+  return IS_LOCAL_HOST ? FALLBACK_PUBLIC_API : BASE;
+}
+
 function simulatorCommand(device) {
   const d = device || {};
   return `VTSIM_DEVICE_ID=${d.deviceId || 'vt_...'} ` +
     `VTSIM_API_KEY=${d.apiKey || 'SUA_CHAVE'} ` +
-    `VTSIM_API_URL=${BASE} npm run simulator`;
+    `VTSIM_API_URL=${simulatorBaseUrl()} npm run simulator`;
 }
 
 function renderSimulator(o) {
@@ -1073,7 +1093,7 @@ function renderSimulator(o) {
     const runnerLabel = state.runnerAvailable
       ? (running ? 'runner ativo' : 'runner parado')
       : '';
-    const cmd = simulatorCommand(d);
+    const cmd = v.simulatorCommand || simulatorCommand(d);
     return `
       <div class="cloud-row">
         <div>

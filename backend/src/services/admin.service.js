@@ -130,6 +130,20 @@ function serializeDevice(device) {
   };
 }
 
+/**
+ * Comando pronto do hardware-simulator para um device virtual.
+ *
+ * Usa SEMPRE a URL pública configurada (`PUBLIC_API_URL` ou o domínio da
+ * Vercel). Antes o painel montava o comando com `location.origin`: aberto em
+ * localhost, o comando copiado apontava para `http://localhost:3000` e falhava
+ * em qualquer outra máquina.
+ */
+function simulatorCommandFor(device) {
+  if (!device?.deviceId || !device?.apiKey) return null;
+  const url = config.publicApiUrl ? ` VTSIM_API_URL=${config.publicApiUrl}` : '';
+  return `VTSIM_DEVICE_ID=${device.deviceId} VTSIM_API_KEY=${device.apiKey}${url} npm run simulator`;
+}
+
 function serializeVehicle(v, { device, telemetry }) {
   // A posição do documento do veículo no Firestore é gravada com throttle
   // (telemetry.service.js: WRITE_THROTTLE_MS). A telemetria do RTDB é a fonte
@@ -170,6 +184,8 @@ function serializeVehicle(v, { device, telemetry }) {
     simulation: getSimulationDecision(v, device),
     // Status do processo do simulador para ESTE device (false na Vercel).
     runner: simulationRunner(device?.deviceId),
+    // Comando completo (device + chave + URL pública) para copiar e rodar.
+    simulatorCommand: simulatorCommandFor(device),
     device,
     telemetry,
   };
@@ -369,6 +385,9 @@ export async function buildOverview() {
 
   return {
     service: serviceInfo(),
+    // URL pública para montar comandos do simulador sem depender do host
+    // onde o painel foi aberto (localhost em desenvolvimento).
+    publicApiUrl: config.publicApiUrl || null,
     counts,
     sync: syncInfo(),
     users,

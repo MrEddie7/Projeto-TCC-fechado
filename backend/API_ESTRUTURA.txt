@@ -513,6 +513,11 @@
      um carro pelo botão "Simular" sem runner local, o painel abre na hora o
      modal com a chave e o comando pronto para copiar.
 
+     O comando copiado sempre usa PUBLIC_API_URL (ou o domínio da Vercel):
+     nunca `http://localhost:3000`. A própria API devolve o campo
+     `simulatorCommand` pronto em /v1/admin/overview e /v1/admin/vehicles/:id,
+     além de `publicApiUrl` no overview.
+
  Tudo vem DIRETAMENTE do Firestore/RTDB (services/admin.service.js): não há
  mais importação para banco local. O formato das respostas é o mesmo que o
  painel já consumia (counts, users, vehicles, phoneVehicles, screens, service,
@@ -670,6 +675,8 @@
                           bloqueio caber no timeout de 20s do app)
  SIMULATOR_START_LAT/LNG  partida do simulador (-23.5505 / -46.6333)
  SIMULATION_ENABLED       liga a criação de rastreadores virtuais (true)
+ PUBLIC_API_URL           URL pública usada no comando do simulador; se
+                          vazia, usa VERCEL_PROJECT_PRODUCTION_URL/VERCEL_URL
  LOG_REQUESTS             log de requisições no console (true)
 
  FIREBASE_SERVICE_ACCOUNT  caminho do service account JSON (obrigatório)

@@ -54,6 +54,27 @@ const toPort = (v, def) => {
   return Number.isNaN(n) || n < 1 || n > 65535 ? def : n;
 };
 
+// URL pública que o simulador deve usar (a que aparece no comando copiado do
+// painel). Sem isso o comando cairia em `http://localhost:3000`, que só
+// funciona quando a API está rodando na mesma máquina.
+function normalizeBaseUrl(v) {
+  const s = String(v || '').trim().replace(/\/+$/, '');
+  return /^https?:\/\//i.test(s) ? s : '';
+}
+
+function resolvePublicApiUrl() {
+  const explicit = normalizeBaseUrl(process.env.PUBLIC_API_URL);
+  if (explicit) return explicit;
+  // Na Vercel estas variáveis são injetadas automaticamente. A de produção
+  // (domínio estável) tem prioridade sobre a URL única do deployment.
+  const vercel =
+    process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
+  if (vercel) {
+    return normalizeBaseUrl(`https://${String(vercel).replace(/^https?:\/\//i, '')}`);
+  }
+  return '';
+}
+
 export const config = {
   port: toPort(process.env.PORT, 3000),
   simulatorIntervalMs: toInt(process.env.SIMULATOR_INTERVAL_MS, 5000),
@@ -66,6 +87,8 @@ export const config = {
   // (device com model='server-sim') e sobe o processo do simulador. O painel
   // (e o app) ligam/desligam isso em POST /v1/admin/vehicles/:id/simulation.
   simulationEnabled: (process.env.SIMULATION_ENABLED || 'true').toLowerCase() === 'true',
+  // Domínio público usado no comando do simulador (sem localhost).
+  publicApiUrl: resolvePublicApiUrl(),
 
   // ── Firebase (Firestore + Realtime Database) ──────────────────────────
   firebaseServiceAccount: process.env.FIREBASE_SERVICE_ACCOUNT
