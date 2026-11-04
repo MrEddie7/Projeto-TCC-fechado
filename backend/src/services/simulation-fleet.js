@@ -29,6 +29,18 @@ function canSpawn() {
   return (process.env.START_SIMULATOR || 'true').toLowerCase() !== 'false';
 }
 
+/**
+ * A API consegue subir/derrubar processos de simulador neste runtime?
+ *
+ * Diferente de `config.simulationEnabled`: na Vercel a simulação pode estar
+ * habilitada (criar rastreador virtual + gerar apiKey), mas processos não
+ * sobrevivem entre requisições — nesse caso é `false` e o app/painel avisa
+ * que o simulador precisa rodar em outra máquina.
+ */
+export function simulationRunnerAvailable() {
+  return canSpawn();
+}
+
 function pipeTagged(stream, deviceId, write) {
   stream.on('data', (buf) => {
     for (const line of String(buf).split('\n')) {

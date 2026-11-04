@@ -370,8 +370,8 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
                 commandMessage = when {
                     confirmed -> if (blocked) "Veículo bloqueado" else "Veículo desbloqueado"
                     else -> "Comando de $acao na fila, mas nenhum rastreador confirmou em " +
-                        "${ACK_TIMEOUT_MS / 1000}s. Confira se o veículo tem rastreador ou " +
-                        "simulador ativo."
+                        "${ACK_TIMEOUT_MS / 1000}s. Verifique se o rastreador ou simulador está ativo. " +
+                        "Para carros simulados, rode o comando/chave da aba Simulador do painel."
                 }
             )
         }

@@ -141,6 +141,23 @@
   button.small { padding: 3px 8px; font-size: 11.5px; border-radius: 6px; white-space: nowrap; }
   .sim-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; flex-wrap: wrap; }
 
+  /* Abas do painel: visão geral x simulador. */
+  .tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+  .tab {
+    border: 1px solid var(--line); border-bottom: none; border-radius: 8px 8px 0 0;
+    padding: 8px 16px; background: var(--panel2); color: var(--muted); font-weight: 600;
+  }
+  .tab.active { background: var(--panel); color: var(--fg); border-color: var(--accent); }
+  .tab:hover { color: var(--fg); }
+
+  /* Aba Simulador: lista de rastreadores virtuais. */
+  .sim-row-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; margin-top: 6px; }
+  .sim-key { font-family: ui-monospace, monospace; font-size: 11.5px; overflow-wrap: anywhere; }
+  .sim-runner { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; }
+  .sim-runner .dot { width: 8px; height: 8px; }
+  details.sim-key-box summary { cursor: pointer; color: var(--accent); font-size: 11.5px; }
+  details.sim-key-box code { display: block; margin-top: 4px; word-break: break-all; }
+
   /* Modal (chave do rastreador virtual / novo veículo simulado). */
   .modal {
     position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center;
@@ -202,6 +219,8 @@
   }
   .hud b { font-family: ui-monospace, monospace; font-weight: 600; }
   .hud-actions { margin-top: 6px; display: flex; gap: 6px; }
+  .hud-sim { display: flex; align-items: center; gap: 5px; margin-top: 4px; font-size: 11px; color: var(--muted); }
+  .hud-sim[hidden] { display: none; }
   button.danger { color: var(--err); border-color: rgba(240,97,109,.45); }
   button.danger:hover { border-color: var(--err); }
   button.ok { color: var(--ok); border-color: rgba(88,214,141,.45); }
@@ -291,6 +310,12 @@
 </header>
 
 <main>
+  <nav class="tabs" role="tablist" aria-label="Seções do painel">
+    <button type="button" class="tab active" data-tab="overview" role="tab" aria-selected="true">Visão geral</button>
+    <button type="button" class="tab" data-tab="simulator" role="tab" aria-selected="false">Simulador</button>
+  </nav>
+
+  <div id="viewOverview">
   <div class="stats" id="stats">
     <div class="card accent">
       <div class="k">API</div>
@@ -369,6 +394,7 @@
             <div>velocidade <b id="hudSpeed">—</b> km/h</div>
             <div>lat <b id="hudLat">—</b> · lon <b id="hudLng">—</b></div>
             <div>bateria <b id="hudBat">—</b>%</div>
+            <div class="hud-sim" id="hudSimState" hidden></div>
             <!-- Comando de bloqueio: o estado só muda quando o rastreador
                  confirma (ACK), por isso o botão reflete a resposta real. -->
             <div class="hud-actions">
@@ -398,6 +424,23 @@
       </section>
     </div>
   </div>
+  </div>
+
+  <div id="viewSimulator" hidden>
+    <section class="panel">
+      <div class="head">
+        <h2>Simulador · rastreadores virtuais</h2>
+        <div class="spacer"></div>
+        <span class="chip" id="chipSim"><span class="dot"></span><span>—</span></span>
+        <button type="button" class="small primary" id="btnNewSimTab" title="Cria um veículo novo já com rastreador virtual e mostra a chave da API">+ Novo simulado</button>
+        <button type="button" class="small" id="btnRefreshSim">Atualizar</button>
+      </div>
+      <div class="body">
+        <p class="hint" id="simNotice">—</p>
+        <div id="simList"><div class="empty-state">Entre para ver os carros simulados.</div></div>
+      </div>
+    </section>
+  </div>
 </main>
 
 <!-- Modal: chave do rastreador virtual e criação de veículo simulado.
@@ -426,11 +469,15 @@ const state = {
   lastSeq: 0, logStream: null, telStream: null, refreshTimer: null, vehiclesById: {},
   // Simulação do veículo selecionado (alimenta o botão "Simular" do HUD).
   vehicleSimulated: false, vehicleHasDevice: false, vehicleSimulation: null,
+  // Device do veículo selecionado (lastSeen = último contato do simulador).
+  vehicleDevice: null,
   // Última visão geral recebida, indexada por id: o modal da chave lê o device
   // (com apiKey) daqui, sem precisar de outra chamada de rede.
   overviewVehicles: {},
   // O servidor está com a simulação habilitada? (SIMULATION_ENABLED)
   simulationAvailable: true,
+  // A API consegue manter processos de simulador? (false na Vercel)
+  runnerAvailable: true,
   // Sessão Firebase: o idToken expira em 1 h. Guardamos o refreshToken do login
   // para renovar automaticamente e evitar 401 em sessões longas.
   refreshToken: null, tokenExpiresAt: 0, tokenRefreshTimer: null, refreshing: false,
@@ -540,6 +587,26 @@ function isLive(v) {
   return !!(v && (v.online || v.connected));
 }
 
+/**
+ * Estado do simulador a partir do último contato do device virtual.
+ * `lastSeen` é gravado pelo heartbeat/telemetria do hardware-simulator.
+ * Sem contato recente, o comando de bloqueio fica pendente para sempre —
+ * por isso o painel precisa diferenciar "nunca conectou" de "parado".
+ */
+function simulatorConnection(device) {
+  const last = Number(device?.lastSeen || 0);
+  if (!last) {
+    return { cls: 'err', label: 'simulador nunca conectou', hint: 'rode o comando da aba Simulador' };
+  }
+  const age = Date.now() - last;
+  const stale = age > 3 * 60 * 1000;
+  return {
+    cls: stale ? 'warn' : 'ok',
+    label: `${stale ? 'sem contato' : 'conectado'} (${fmtAgo(last)})`,
+    hint: stale ? 'o simulador pode ter parado' : '',
+  };
+}
+
 function setChip(el, cls, text) {
   el.className = 'chip' + (cls ? ' ' + cls : '');
   el.lastElementChild.textContent = text;
@@ -557,12 +624,15 @@ function renderOverview(o) {
   // API responde 409 — então fica desabilitado e diz o motivo no title.
   const simOn = c.simulationAvailable !== false;
   state.simulationAvailable = simOn;
-  const newSim = $('btnNewSim');
-  if (newSim) {
-    newSim.disabled = !simOn;
-    newSim.title = simOn
-      ? 'Cria um veículo novo já com rastreador virtual e mostra a chave da API'
-      : 'Simulação desativada no servidor (SIMULATION_ENABLED=false)';
+  state.runnerAvailable = c.runnerAvailable !== false;
+  const simTitle = simOn
+    ? 'Cria um veículo novo já com rastreador virtual e mostra a chave da API'
+    : 'Simulação desativada no servidor (SIMULATION_ENABLED=false)';
+  for (const btnId of ['btnNewSim', 'btnNewSimTab']) {
+    const btn = $(btnId);
+    if (!btn) continue;
+    btn.disabled = !simOn;
+    btn.title = simTitle;
   }
 
   $('stApi').textContent = s.version ? 'v' + s.version : 'online';
@@ -612,6 +682,14 @@ function renderOverview(o) {
   state.overviewVehicles = {};
   for (const v of o.vehicles || []) state.overviewVehicles[Number(v.id)] = v;
 
+  // Mantém o HUD sincronizado com o último contato do simulador, mesmo que
+  // ninguém troque de veículo (o refresh é a cada 7s).
+  const selected = state.overviewVehicles[Number(state.vehicleId)];
+  if (selected) {
+    state.vehicleDevice = selected.device || null;
+    updateSimStatus();
+  }
+
   renderUsers(o.users || []);
   renderScreens(o.screens || []);
   // Mapa: guarda a última posição do celular por usuário, para exibir o
@@ -621,6 +699,7 @@ function renderOverview(o) {
     if (u && u.mobileLocation) mobileByUser[u.id] = u.mobileLocation;
   }
   renderPhoneVehicles(o);
+  renderSimulator(o);
   // Mapa: desenha a frota inteira (veículos de todos os usuários) e depois o
   // marcador do celular do proprietário selecionado.
   renderFleet(o.vehicles || []);
@@ -702,7 +781,7 @@ function showKey(vehicle, device) {
     alert('Este veículo ainda não tem rastreador virtual. Use "Simular" primeiro.');
     return;
   }
-  const cmd = `VTSIM_DEVICE_ID=${d.deviceId} VTSIM_API_KEY=${d.apiKey} npm run simulator`;
+  const cmd = `VTSIM_DEVICE_ID=${d.deviceId} VTSIM_API_KEY=${d.apiKey} VTSIM_API_URL=${BASE} npm run simulator`;
   openModal(`Rastreador virtual · ${v.plate || d.deviceId}`, `
     <div class="key-grid">
       <div class="key-row"><span class="k">Veículo</span><code>${esc(v.plate || '—')}</code><span></span></div>
@@ -790,6 +869,11 @@ async function toggleSimulation(btn) {
     if (!res.ok) throw new Error(res.data?.error || `HTTP ${res.status}`);
     await refreshOverview();
     if (state.vehicleId === id) await selectVehicle(id);
+    // Na Vercel (ou quando o spawn local falha) o runner não sobe. Abrir a
+    // chave/comando na hora evita a impressão de que o carro já está andando.
+    if (simulate && res.data?.device && res.data.runner?.started !== true) {
+      showKey(res.data.vehicle, res.data.device);
+    }
   } catch (err) {
     btn.disabled = false;
     btn.textContent = label;
@@ -940,6 +1024,82 @@ function renderPhoneVehicles(o) {
   }).join('') +
     `<div class="sub" style="padding:8px 13px">${withTracker} com rastreador (${virtual} virtual(is)) · ` +
     `${list.length - withTracker} sem rastreador</div>`;
+}
+
+// ── Aba Simulador (painel) ────────────────────────────────────────────────
+
+/** Comando pronto para rodar o hardware-simulator apontando para esta API. */
+function simulatorCommand(device) {
+  const d = device || {};
+  return `VTSIM_DEVICE_ID=${d.deviceId || 'vt_...'} ` +
+    `VTSIM_API_KEY=${d.apiKey || 'SUA_CHAVE'} ` +
+    `VTSIM_API_URL=${BASE} npm run simulator`;
+}
+
+function renderSimulator(o) {
+  const box = $('simList');
+  if (!box) return;
+  const list = (o.vehicles || []).filter(
+    (v) => v.simulated && v.device && v.device.model === 'server-sim'
+  );
+  setChip($('chipSim'), list.length ? 'live' : 'warn', `${list.length} carro(s) simulado(s)`);
+
+  const notice = $('simNotice');
+  if (!state.simulationAvailable) {
+    notice.textContent =
+      'Simulação desativada nesta API (SIMULATION_ENABLED=false). Não é possível criar rastreadores virtuais.';
+  } else if (!state.runnerAvailable) {
+    notice.textContent =
+      'Esta API não executa simuladores (Vercel): o carro e a chave são criados normalmente, ' +
+      'mas o veículo só se move rodando o simulador na sua máquina com o comando copiado.';
+  } else {
+    notice.textContent =
+      'Esta API executa o simulador automaticamente ao criar o carro. ' +
+      'Use a chave/comando para rodar em outra máquina se precisar.';
+  }
+
+  if (!list.length) {
+    box.innerHTML =
+      '<div class="empty-state">Nenhum carro simulado ainda. ' +
+      'Use “+ Novo simulado” para criar e gerar a chave.</div>';
+    return;
+  }
+
+  box.innerHTML = list.map((v) => {
+    const d = v.device || {};
+    const owner = v.owner || {};
+    const running = v.runner && v.runner.started === true;
+    const conn = simulatorConnection(d);
+    const runnerLabel = state.runnerAvailable
+      ? (running ? 'runner ativo' : 'runner parado')
+      : '';
+    const cmd = simulatorCommand(d);
+    return `
+      <div class="cloud-row">
+        <div>
+          <b>${esc(v.plate)}</b> <span class="badge sim">simulado</span>
+          <div class="sub">${esc(v.brand)} ${esc(v.model)} · ${esc(v.year)} · dono ${esc(owner.name || owner.email || '—')}</div>
+          <div class="sub">device <code>${esc(d.deviceId || '—')}</code></div>
+          <details class="sim-key-box sub">
+            <summary>mostrar chave da API</summary>
+            <code>${esc(d.apiKey || '—')}</code>
+          </details>
+          <div class="sub" style="margin-top:4px">
+            <span class="sim-runner"><span class="dot ${conn.cls}"></span>${esc(conn.label)}</span>
+            ${runnerLabel ? `· ${esc(runnerLabel)}` : ''}
+          </div>
+          ${conn.hint ? `<div class="sub">${esc(conn.hint)}</div>` : ''}
+        </div>
+        <div>
+          <div class="sub" style="text-align:right">${isLive(v) ? 'online' : 'offline'} · ${v.speed ?? 0} km/h<br>${fmtAgo(v.lastUpdate)}</div>
+          <div class="sim-row-actions">
+            <button type="button" class="small" data-copy="${esc(d.apiKey || '')}">copiar chave</button>
+            <button type="button" class="small" data-copy="${esc(cmd)}">copiar comando</button>
+            <button type="button" class="small sim-toggle" data-sim-id="${Number(v.id)}" data-sim-next="0" title="Remove o rastreador virtual (o carro continua cadastrado)">Parar</button>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
 }
 
 async function importFromPhoneCloud() {
@@ -1138,11 +1298,29 @@ function updateBlockButton() {
 
 // Estado de simulação do veículo selecionado, vindo de
 // GET /v1/admin/vehicles/:id (`simulated`, `device` e a decisão `simulation`).
-function setHudSim(simulated, hasDevice, simulation) {
+function setHudSim(simulated, hasDevice, simulation, device) {
   state.vehicleSimulated = !!simulated;
   state.vehicleHasDevice = !!hasDevice;
   state.vehicleSimulation = simulation || null;
+  state.vehicleDevice = device || null;
+  updateSimStatus();
   updateSimButton();
+}
+
+/** Linha do HUD com o último contato do rastreador virtual. */
+function updateSimStatus() {
+  const el = $('hudSimState');
+  if (!el) return;
+  if (!state.vehicleSimulated) {
+    el.hidden = true;
+    el.innerHTML = '';
+    return;
+  }
+  const conn = simulatorConnection(state.vehicleDevice);
+  el.hidden = false;
+  el.innerHTML =
+    `<span class="dot ${conn.cls}"></span>` +
+    `<span>${esc(conn.label)}${conn.hint ? ' · ' + esc(conn.hint) : ''}</span>`;
 }
 
 // Botão "Simular" do HUD: age no veículo selecionado. Some quando não há o que
@@ -1171,7 +1349,12 @@ async function sendBlockCommand() {
   const command = blocked ? 'unblock' : 'block';
   btn.dataset.pending = '1';
   updateBlockButton();
-  $('hudBlockInfo').textContent = 'aguardando rastreador...';
+  const conn = simulatorConnection(state.vehicleDevice);
+  const target = state.vehicleSimulated ? 'simulador' : 'rastreador';
+  $('hudBlockInfo').textContent =
+    state.vehicleSimulated && conn.cls !== 'ok'
+      ? `comando na fila — ${conn.label}`
+      : `comando na fila — aguardando ${target}`;
   try {
     const res = await api(`/v1/admin/vehicles/${state.vehicleId}/commands`, {
       method: 'POST',
@@ -1282,8 +1465,38 @@ $('btnSim').addEventListener('click', async () => {
   }
 });
 
+// ── Abas (visão geral x simulador) ───────────────────────────────────────
+
+function showTab(name) {
+  const tab = name === 'simulator' ? 'simulator' : 'overview';
+  $('viewOverview').hidden = tab !== 'overview';
+  $('viewSimulator').hidden = tab !== 'simulator';
+  document.querySelectorAll('.tab').forEach((btn) => {
+    const active = btn.dataset.tab === tab;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  try { localStorage.setItem('securitas-panel-tab', tab); } catch { /* modo privado */ }
+}
+
+document.querySelectorAll('.tab').forEach((btn) => {
+  btn.addEventListener('click', () => showTab(btn.dataset.tab));
+});
+try {
+  showTab(localStorage.getItem('securitas-panel-tab') || 'overview');
+} catch {
+  showTab('overview');
+}
+
 // Modal: abrir o formulário de veículo simulado e fechar de três jeitos.
 $('btnNewSim').addEventListener('click', openNewSimulatedVehicle);
+$('btnNewSimTab').addEventListener('click', openNewSimulatedVehicle);
+$('btnRefreshSim').addEventListener('click', async () => {
+  const btn = $('btnRefreshSim');
+  btn.disabled = true;
+  await refreshOverview();
+  btn.disabled = false;
+});
 $('modalClose').addEventListener('click', closeModal);
 $('modal').addEventListener('click', (ev) => {
   if (ev.target === $('modal')) closeModal(); // clique no fundo
@@ -1423,7 +1636,7 @@ async function selectVehicle(id) {
   if (res.ok) {
     const v = res.data.vehicle;
     setHud(v.plate, v.speed, v.latitude, v.longitude, null, v.isBlocked);
-    setHudSim(v.simulated, Boolean(v.device), v.simulation);
+    setHudSim(v.simulated, Boolean(v.device), v.simulation, res.data.device);
     setHudOwner(res.data.owner?.name || null);
     if (v.latitude && v.longitude) {
       moveMarker(v.latitude, v.longitude, true);
@@ -1594,6 +1807,8 @@ $('btnLogout').addEventListener('click', async () => {
   $('screensMeta').textContent = '—';
   $('usersMeta').textContent = '—';
   $('phoneVehicles').innerHTML = '<div class="empty-state">Entre para ver os veículos enviados pelo app.</div>';
+  $('simList').innerHTML = '<div class="empty-state">Entre para ver os carros simulados.</div>';
+  setChip($('chipSim'), '', '—');
   setChip($('chipCloud'), '', '—');
   $('mapPhoneLegend').hidden = true;
   fleetLayer.clearLayers();

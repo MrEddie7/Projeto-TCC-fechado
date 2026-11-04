@@ -10,13 +10,16 @@
 import { randomBytes } from 'node:crypto';
 import { config } from '../config.js';
 import { HttpError } from '../util/http-error.js';
+import { isQuotaError } from '../util/firestore-errors.js';
 import { firestore, rtdb, makeId } from './firestore-store.js';
 import { publishToVehicle } from '../realtime/sse.js';
 import { getFirebase } from '../firebase/firebase-admin.js';
 import { rememberDevice } from './device-key-cache.js';
-import { startSimulatedDevice, stopSimulatedDevice } from './simulation-fleet.js';
+import { startSimulatedDevice, stopSimulatedDevice, simulationRunnerAvailable } from './simulation-fleet.js';
 
 export const SERVER_SIM_MODEL = 'server-sim';
+
+const PLATE = /^[A-Z]{3}\d[A-Z0-9]\d{2}$|^[A-Z]{3}-\d{4}$/;
 
 const isServerSim = (device) => Boolean(device) && device.model === SERVER_SIM_MODEL;
 
@@ -80,6 +83,9 @@ export function getSimulationDecision(vehicle, device = undefined) {
     hasDevice,
     deviceSimulated: serverSimulated,
     simulationAvailable: config.simulationEnabled,
+    // A simulação pode estar disponível (criar carro/chave), mas o processo só
+    // roda onde `canSpawn()` é true (API local, não na Vercel serverless).
+    runnerAvailable: simulationRunnerAvailable(),
     recommended,
     reason,
   };
@@ -143,12 +149,90 @@ export async function applySimulationDecision(vehicle, simulate) {
     stopSimulatedDevice(removedId);
     await db.collection('devices').doc(removedId).delete();
     await rtdb().ref(`telemetry/${vehicle.id}`).remove().catch(() => {});
+    // Comandos pendentes do rastreador virtual que acabou de sair não têm
+    // mais quem os confirme. Sem esta limpeza, eles ficavam "pending" para
+    // sempre e o painel/app pareciam travados.
+    try {
+      const cmds = await db.collection('commands')
+        .where('vehicleId', '==', Number(vehicle.id))
+        .get();
+      const pending = cmds.docs.filter((d) => d.data().status === 'pending');
+      await Promise.all(pending.map((d) => d.ref.delete()));
+    } catch (e) {
+      if (!isQuotaError(e)) {
+        console.warn(`[sim] não foi possível limpar comandos pendentes: ${e.message}`);
+      }
+    }
+    await rtdb().ref(`commands/${vehicle.id}`).remove().catch(() => {});
     device = null;
   }
 
   await vehicleRef.set({ simulated: Boolean(simulate), updatedAt: Date.now() }, { merge: true });
   const updated = (await vehicleRef.get()).data();
   return { vehicle: updated, device, runner };
+}
+
+/**
+ * Cria um veículo já na frota simulada, do dono informado.
+ *
+ * Usado tanto pelo painel admin (`POST /v1/admin/simulation/vehicles`) quanto
+ * pelo app (`POST /v1/simulation/vehicles`). Centraliza validação de placa,
+ * checagem de duplicata, criação do device server-sim e rollback caso a
+ * simulação falhe — sem deixar veículo órfão no Firestore.
+ *
+ * @returns {Promise<{ vehicle: object, device: object|null, runner: object }>}
+ */
+export async function createSimulatedVehicleForOwner(ownerUid, input = {}) {
+  // Checar ANTES de gravar: criar o veículo e só então descobrir que a
+  // simulação está desligada deixaria um veículo órfão no Firestore.
+  if (!config.simulationEnabled) {
+    throw new HttpError(409, 'Simulação desativada no servidor (SIMULATION_ENABLED=false)');
+  }
+  const { plate, model, brand, year, color = '' } = input || {};
+  const normalized = String(plate || '').trim().toUpperCase().replace(/\s+/g, '');
+  if (!model || !brand || !PLATE.test(normalized)) {
+    throw new HttpError(400, 'Informe placa (ABC1D23 ou ABC-1234), modelo e marca');
+  }
+
+  const db = firestore();
+  const duplicate = await db
+    .collection('vehicles')
+    .where('ownerUid', '==', ownerUid)
+    .where('plate', '==', normalized)
+    .limit(1)
+    .get();
+  if (!duplicate.empty) throw new HttpError(409, `Você já tem um veículo com a placa ${normalized}`);
+
+  const now = Date.now();
+  const vehicle = {
+    id: makeId(),
+    userId: ownerUid,
+    ownerUid,
+    plate: normalized,
+    model: String(model),
+    brand: String(brand),
+    year: Number(year) || 0,
+    color: String(color),
+    isBlocked: false,
+    latitude: 0,
+    longitude: 0,
+    speed: 0,
+    lastUpdate: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const vehicleRef = db.collection('vehicles').doc(String(vehicle.id));
+  await vehicleRef.set(vehicle);
+
+  // applySimulationDecision cria o device server-sim (com apiKey) e, quando a
+  // API roda local, sobe o simulador desse rastreador. Se falhar depois de o
+  // veículo já existir, apaga o documento em vez de deixar lixo.
+  try {
+    return await applySimulationDecision(vehicle, true);
+  } catch (err) {
+    await vehicleRef.delete().catch(() => {});
+    throw err;
+  }
 }
 
 // ── Posição manual (painel: arrastar o veículo no mapa) ───────────────────

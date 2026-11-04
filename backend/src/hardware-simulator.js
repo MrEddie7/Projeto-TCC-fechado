@@ -26,6 +26,10 @@ const API_URL =
   process.env.VTSIM_API_URL ||
   argValue('url', `http://localhost:${config.port}`);
 const INTERVAL_MS = Number(process.env.VTSIM_INTERVAL_MS || config.simulatorIntervalMs);
+// Comandos têm um laço próprio e bem mais rápido que a telemetria: o app
+// desiste do ACK em 20s, então esperar o intervalo de telemetria (que pode
+// ser 30s) fazia o bloqueio parecer quebrado mesmo com o simulador no ar.
+const COMMAND_INTERVAL_MS = Number(process.env.VTSIM_COMMAND_INTERVAL_MS || 3000);
 
 if (!DEVICE_ID || !API_KEY) {
   console.error('Informe VTSIM_DEVICE_ID e VTSIM_API_KEY (gerados em POST /v1/vehicles/:id/device).');
@@ -47,6 +51,10 @@ let blocked = false;
 // Alvo de posição definido no painel (arrastar o veículo no mapa). Guardamos o
 // carimbo (updatedAt) já aplicado para só reancorar quando ELE mudar.
 let appliedControlAt = 0;
+// Evita dois polls de comando simultâneos (rede lenta) e repete o log de
+// erro só quando a causa muda, para não inundar o terminal a cada 3s.
+let pollingCommands = false;
+let lastCommandError = '';
 
 // Rota viária que este simulador vai percorrer. Determinada no boot a partir
 // dos últimos caracteres do DEVICE_ID para distribuir dispositivos pelas vias.
@@ -98,27 +106,41 @@ async function request(method, path, body) {
 }
 
 async function pollCommands() {
-  const { status, json } = await request('GET', `/v1/hardware/${DEVICE_ID}/commands?status=pending`);
-  if (status !== 200) return 0;
-  for (const cmd of json.commands || []) {
-    console.log(`[sim] comando recebido: ${cmd.command} (id=${cmd.id})`);
-    // Simula "execução física" no relê de corte de ignição.
-    const ok = Math.random() > 0.05; // 5% de chance de falha para testes
-    await request('POST', `/v1/hardware/${DEVICE_ID}/commands/${cmd.id}/ack`, {
-      ok,
-      note: ok ? 'executado pelo relê' : 'falha no atuador',
-    });
-    // Só muda o estado físico se o atuador executou de fato (ACK).
-    if (ok && cmd.command === 'block') {
-      blocked = true;
-      console.log('[sim] ignição CORTADA (veículo bloqueado)');
-    } else if (ok && cmd.command === 'unblock') {
-      blocked = false;
-      console.log('[sim] ignição LIBERADA (veículo desbloqueado)');
+  if (pollingCommands) return 0;
+  pollingCommands = true;
+  try {
+    const { status, json } = await request('GET', `/v1/hardware/${DEVICE_ID}/commands?status=pending`);
+    if (status !== 200) {
+      const message = `[sim] falha ao consultar comandos (${status}) em ${API_URL}: ${json.error || 'sem detalhe'}`;
+      if (message !== lastCommandError) {
+        console.error(message);
+        lastCommandError = message;
+      }
+      return 0;
     }
-    console.log(`[sim] confirmado ${ok ? 'ACK' : 'NACK'} para comando ${cmd.id}`);
+    lastCommandError = '';
+    for (const cmd of json.commands || []) {
+      console.log(`[sim] comando recebido: ${cmd.command} (id=${cmd.id})`);
+      // Simula "execução física" no relê de corte de ignição.
+      const ok = Math.random() > 0.05; // 5% de chance de falha para testes
+      await request('POST', `/v1/hardware/${DEVICE_ID}/commands/${cmd.id}/ack`, {
+        ok,
+        note: ok ? 'executado pelo relê' : 'falha no atuador',
+      });
+      // Só muda o estado físico se o atuador executou de fato (ACK).
+      if (ok && cmd.command === 'block') {
+        blocked = true;
+        console.log('[sim] ignição CORTADA (veículo bloqueado)');
+      } else if (ok && cmd.command === 'unblock') {
+        blocked = false;
+        console.log('[sim] ignição LIBERADA (veículo desbloqueado)');
+      }
+      console.log(`[sim] confirmado ${ok ? 'ACK' : 'NACK'} para comando ${cmd.id}`);
+    }
+    return (json.commands || []).length;
+  } finally {
+    pollingCommands = false;
   }
-  return (json.commands || []).length;
 }
 
 // Consulta o alvo de posição definido no painel (arrastar o veículo no mapa).
@@ -194,20 +216,34 @@ async function boot() {
 }
 
 await boot();
-console.log(`[sim] enviando telemetria a cada ${INTERVAL_MS}ms (Ctrl+C para parar)`);
+console.log(`[sim] API ${API_URL} | device ${DEVICE_ID}`);
+console.log(
+  `[sim] telemetria a cada ${INTERVAL_MS}ms; comandos a cada ${COMMAND_INTERVAL_MS}ms (Ctrl+C para parar)`
+);
 
 await pollCommands();
 await sendTelemetry();
-const timer = setInterval(async () => {
+
+const telemetryTimer = setInterval(async () => {
   try {
     await sendTelemetry();
-    await pollCommands();
   } catch (e) {
-    console.error('[sim] erro:', e.message);
+    console.error('[sim] erro na telemetria:', e.message);
   }
 }, INTERVAL_MS);
 
-process.on('SIGINT', () => {
-  clearInterval(timer);
+const commandTimer = setInterval(async () => {
+  try {
+    await pollCommands();
+  } catch (e) {
+    console.error('[sim] erro ao consultar comandos:', e.message);
+  }
+}, COMMAND_INTERVAL_MS);
+
+function shutdown() {
+  clearInterval(telemetryTimer);
+  clearInterval(commandTimer);
   process.exit(0);
-});
+}
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);

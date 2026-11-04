@@ -9,6 +9,7 @@ import { HttpError } from '../util/http-error.js';
 import { isQuotaError } from '../util/firestore-errors.js';
 import { publishToVehicle } from '../realtime/sse.js';
 import { notifyVehicleState } from './notifications.service.js';
+import { cachedVehicle, mirrorVehicles } from './vehicle-cache.js';
 
 /** Comandos aceitos pelo protocolo do firmware. */
 export const COMMANDS = ['block', 'unblock'];
@@ -201,6 +202,24 @@ export async function acknowledgeCommand(vehicleId, commandId, { ok, note } = {}
       );
     } catch (e) {
       if (!isQuotaError(e)) throw e;
+    }
+    // Mantém o espelho do RTDB alinhado: o APP/painel em modo offline lê
+    // `vehicles_mirror`, e sem isto o bloqueio só aparecia no Firestore.
+    try {
+      const cache = await cachedVehicle(vid);
+      if (cache) {
+        await mirrorVehicles([{ ...cache, isBlocked: blocked, updatedAt: now }]);
+      } else {
+        // Espelho ainda vazio (nunca listado): sem isto o ACK só existiria no
+        // Firestore e o app/painel em modo offline continuaria vendo o estado
+        // antigo. O comando é raro, então a leitura extra não pesa na cota.
+        const snap = await firestore().collection('vehicles').doc(String(vid)).get();
+        if (snap.exists) {
+          await mirrorVehicles([{ ...snap.data(), id: vid, isBlocked: blocked, updatedAt: now }]);
+        }
+      }
+    } catch {
+      // espelho é acessório: o Firestore já tem o estado final
     }
     await rtdb().ref(`commands/${vid}`).remove().catch(() => {});
     publishToVehicle(vid, 'blocked', {

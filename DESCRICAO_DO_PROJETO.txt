@@ -1,7 +1,7 @@
 ================================================================================
                  SECURITAS — RESUMO DO APLICATIVO E DA API
 ================================================================================
-Atualizado em: 20/10/2026
+Atualizado em: 04/11/2026
 
 1. VISÃO GERAL
 --------------------------------------------------------------------------------
@@ -86,6 +86,9 @@ Protegidos para o aplicativo (Bearer ID Token do Firebase):
 - `/v1/vehicles` — listar, criar, consultar, editar e excluir veículos.
 - `/v1/vehicles/:id/device` — gera as credenciais do rastreador.
 - `/v1/vehicles/:id/simulation` — consulta/altera a simulação do veículo.
+- `/v1/simulation/vehicles` — lista/cria carros com rastreador virtual e
+  devolve a chave da API do simulador (somente para devices do próprio dono).
+  O painel web usa a variante administrativa em `/v1/admin/simulation/vehicles`.
 - `/v1/vehicles/:id/telemetry/latest` e `/history` — consulta telemetria.
 - `/v1/vehicles/:id/telemetry/stream` — atualizações em tempo real via SSE.
 - `/v1/vehicles/:id/commands` — envia ou lista comandos de bloqueio.
@@ -216,5 +219,18 @@ Além da visão geral da frota, dos logs e do diagnóstico, o painel permite
 posicionar o veículo manualmente arrastando o marcador no mapa e sincronizar o
 Firebase (botão "Sincronizar Firebase"), que replica as contas do Auth para o
 Firestore e os celulares registrados para o Realtime Database.
+
+O painel é dividido em duas abas: "Visão geral" (mapa, frota, logs e
+diagnóstico) e "Simulador" (rastreadores virtuais). Na aba Simulador é possível
+criar um carro simulado, mostrar/copiar a chave da API, copiar o comando do
+simulador e parar a simulação. Na Vercel não existe processo runner: o carro e
+a chave são criados normalmente, mas o veículo só se move executando o comando
+copiado em outra máquina — por isso o painel abre automaticamente o modal da
+chave ao adicionar um carro sem runner.
+
+O painel mostra o estado real de cada simulador pelo último contato do device
+(`lastSeen`): "conectado", "sem contato há X" ou "simulador nunca conectou".
+O bloqueio só é confirmado pelo ACK do rastreador/simulador; enquanto isso o
+comando aparece como pendente, em vez de fingir que o veículo já foi bloqueado.
 
 ================================================================================

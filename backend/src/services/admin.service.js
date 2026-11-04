@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from '../config.js';
 import { getFirebase, getFirebaseInitError } from '../firebase/firebase-admin.js';
 import { getSimulationDecision } from './simulation.service.js';
+import { simulationRunner, simulationRunnerAvailable } from './simulation-fleet.js';
 import { latestPoint, recentPoints } from './telemetry-store.js';
 import { cachedVehicle, cachedDevice } from './vehicle-cache.js';
 import { isQuotaError } from '../util/firestore-errors.js';
@@ -167,6 +168,8 @@ function serializeVehicle(v, { device, telemetry }) {
     lastSeen: num(device?.lastSeen),
     createdAt: num(v.createdAt),
     simulation: getSimulationDecision(v, device),
+    // Status do processo do simulador para ESTE device (false na Vercel).
+    runner: simulationRunner(device?.deviceId),
     device,
     telemetry,
   };
@@ -359,6 +362,9 @@ export async function buildOverview() {
     // O painel usa isto para não oferecer "Simular"/"+ Simulado" quando o
     // servidor desliga a frota virtual (SIMULATION_ENABLED=false na Vercel).
     simulationAvailable: config.simulationEnabled,
+    // Diferente do acima: false na Vercel, onde o device/chave pode ser criado
+    // mas nenhum processo de simulador sobrevive entre requisições.
+    runnerAvailable: simulationRunnerAvailable(),
   };
 
   return {

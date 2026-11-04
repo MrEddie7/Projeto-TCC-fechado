@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { notFound, errorHandler } from './middleware/error.js';
-import vehicles from './routes/vehicles.routes.js';
+import vehicles, { simulationRouter } from './routes/vehicles.routes.js';
 import telemetry from './routes/telemetry.routes.js';
 import commands from './routes/commands.routes.js';
 import routes from './routes/routes.routes.js';
@@ -133,6 +133,8 @@ export function createApp() {
   app.get('/v1/auth/me', (req, res, next) => requireAuthSafe(req, res, next), (req, res) => res.json({ user: req.user }));
 
   app.use('/v1/vehicles', vehicles);
+  // Aba Simulador do app: lista/cria carros com rastreador virtual e apiKey.
+  app.use('/v1/simulation', simulationRouter);
   app.use('/v1/vehicles', telemetry);
   app.use('/v1/vehicles', commands);
   app.use('/v1', routes);

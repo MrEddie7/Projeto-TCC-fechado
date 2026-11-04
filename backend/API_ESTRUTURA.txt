@@ -2,7 +2,7 @@
  SECURITAS - BACKEND API - ESTRUTURA COMPLETA
 ================================================================================
  API de ponte entre o hardware rastreador (GPS IoT) e o app Android
- Última atualização: [2026-10-21]
+ Última atualização: [2026-11-04]
 ================================================================================
 
 ÍNDICE
@@ -259,8 +259,34 @@
 
  POST /v1/vehicles/:id/simulation  🔒
    body: { simulate: true|false }
-   resp 200: { simulation, vehicle, device }
+   resp 200: { simulation, vehicle, device, runner }
    Veículo com rastreador real não pode ser simulado.
+   `runner.started` diz se o processo do simulador subiu nesta API.
+
+ ── Simulador (painel web / API) ────────────────────────────────────────────
+ Router próprio montado em /v1/simulation (o CRUD comum vive em /v1/vehicles).
+ É uma rota de conveniência do dono; o painel web cria os simulados por
+ /v1/admin/simulation/vehicles. Ambas as rotas exigem Authorization: Bearer
+ (Firebase ID Token) e respondem com Cache-Control: no-store, porque carregam
+ credencial de rastreador virtual.
+
+ GET /v1/simulation/vehicles  🔒
+   resp 200: { simulationAvailable, runnerAvailable,
+               vehicles:[ { vehicle, simulated, device, runner, simulation } ] }
+   Lista os veículos do próprio usuário com o rastreador virtual (server-sim).
+   - simulationAvailable: SIMULATION_ENABLED (pode criar carro/chave).
+   - runnerAvailable: a API consegue manter processos de simulador? (false na
+     Vercel serverless; true ao rodar a API localmente).
+   - runner.started: o processo DAQUELE device está ativo nesta API.
+   - device.apiKey só é devolvida quando o device é server-sim do próprio dono.
+     Rastreadores ESP32 reais nunca expõem a chave nesta rota.
+
+ POST /v1/simulation/vehicles  🔒
+   body: { plate, brand, model, year?, color? }
+   resp 201: { vehicle, simulated, device, runner, simulation }
+   Cria o veículo e o rastreador virtual (model='server-sim') de uma vez,
+   devolvendo a apiKey para copiar no simulador. Placa repetida para o mesmo
+   dono -> 409; SIMULATION_ENABLED=false -> 409.
 
  ── Telemetria ──────────────────────────────────────────────────────────────
  GET /v1/vehicles/:id/telemetry/latest  🔒
@@ -473,6 +499,20 @@
  usuário (o app continua restrito ao próprio dono via /v1/vehicles). Todas
  exigem Authorization: Bearer (Firebase ID Token).
 
+ O painel tem duas abas (a escolha fica no localStorage):
+   - "Visão geral": stats, mapa, frota, celulares, logs e diagnóstico.
+   - "Simulador": lista os carros com rastreador virtual, mostra/oculta e
+     copia a chave da API, copia o comando pronto do hardware-simulator e
+     permite remover a simulação ("Parar"). O botão "+ Novo simulado" cria o
+     carro e a chave mesmo na Vercel, onde não há processo runner: nesse caso
+     o veículo só se move rodando o comando copiado na máquina do usuário.
+
+     Estado real do simulador: o painel usa devices.lastSeen para mostrar
+     "conectado", "sem contato há X" ou "simulador nunca conectou". Sem esse
+     contato o comando de bloqueio fica "pending" para sempre. Ao adicionar
+     um carro pelo botão "Simular" sem runner local, o painel abre na hora o
+     modal com a chave e o comando pronto para copiar.
+
  Tudo vem DIRETAMENTE do Firestore/RTDB (services/admin.service.js): não há
  mais importação para banco local. O formato das respostas é o mesmo que o
  painel já consumia (counts, users, vehicles, phoneVehicles, screens, service,
@@ -480,7 +520,8 @@
 
  GET /v1/admin/overview  🔒
    resp 200: { service, counts, sync, users:[...], vehicles:[flattened+owner],
-               phoneVehicles, mobileDevices, screens:[...] }
+               phoneVehicles, mobileDevices, screens:[...],
+               simulationAvailable, runnerAvailable }
    - service: nome, versão, node, port, dbPath ("Firestore \"securitas\""),
      uptime, pid.
    - counts: users, vehicles, simulatedVehicles, realVehicles, blockedVehicles,
@@ -624,6 +665,9 @@
 ================================================================================
  PORT                     porta HTTP (3000)
  SIMULATOR_INTERVAL_MS    intervalo do simulador de hardware (5000)
+ VTSIM_COMMAND_INTERVAL_MS intervalo de consulta de comandos do simulador
+                          (3000; independente da telemetria para o ACK de
+                          bloqueio caber no timeout de 20s do app)
  SIMULATOR_START_LAT/LNG  partida do simulador (-23.5505 / -46.6333)
  SIMULATION_ENABLED       liga a criação de rastreadores virtuais (true)
  LOG_REQUESTS             log de requisições no console (true)
@@ -751,6 +795,14 @@
      SIM_FLEET=2          limita quantos veículos subir no boot
      START_SIMULATOR=false sobe só a API, sem processos de simulação
      VTSIM_DEVICE_ID / VTSIM_API_KEY  fixa um único veículo
+     VTSIM_INTERVAL_MS    intervalo da telemetria (padrão SIMULATOR_INTERVAL_MS)
+     VTSIM_COMMAND_INTERVAL_MS  intervalo da fila de comandos (padrão 3000)
+     VTSIM_API_URL        API de destino (ex.: a URL da Vercel)
+
+   O simulador consulta comandos em um laço SEPARADO da telemetria: assim o
+   ACK de block/unblock chega em poucos segundos mesmo quando a telemetria
+   está configurada para 30s. O ACK grava vehicles.isBlocked no Firestore e
+   espelha o estado em vehicles_mirror no RTDB.
 
    Cada simulador retoma da posição atual do seu veículo (campo /status),
    então a frota não nasce empilhada em um único ponto.

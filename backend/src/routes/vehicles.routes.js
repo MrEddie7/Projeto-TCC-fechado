@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { randomBytes } from 'node:crypto';
+import { config } from '../config.js';
 import { getFirebase } from '../firebase/firebase-admin.js';
 import { requireAuth } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/error.js';
@@ -12,11 +13,16 @@ import {
   getSimulationDecision,
   applySimulationDecision,
   simulateFromBody,
+  createSimulatedVehicleForOwner,
 } from '../services/simulation.service.js';
-import { simulationRunner } from '../services/simulation-fleet.js';
+import { simulationRunner, simulationRunnerAvailable } from '../services/simulation-fleet.js';
 
 const router = Router();
 router.use(requireAuth);
+// Router separado para /v1/simulation: o router principal é montado em
+// /v1/vehicles. Assim a rota pública fica exatamente a planejada para o app.
+const simulationRouter = Router();
+simulationRouter.use(requireAuth);
 const PLATE = /^[A-Z]{3}\d[A-Z0-9]\d{2}$|^[A-Z]{3}-\d{4}$/;
 const id = () => Date.now() * 100 + Math.floor(Math.random() * 100);
 
@@ -47,6 +53,13 @@ export function serializeDevicePublic(d) {
   if (!d) return null;
   const { apiKey, ...pub } = serializeDevice(d);
   return pub;
+}
+// Device de simulação: a apiKey é a credencial que o simulador virtual usa
+// para publicar telemetria. Só pode sair para model='server-sim' e apenas para
+// o dono do veículo (estas rotas já exigem requireAuth + posse).
+export function serializeSimulationDevice(d) {
+  if (!d) return null;
+  return d.model === 'server-sim' ? serializeDevice(d) : serializeDevicePublic(d);
 }
 
 // ── Leitura tolerante à cota do Firestore ────────────────────────────────
@@ -125,6 +138,49 @@ router.get('/', asyncHandler(async (req, res) => {
   res.json({ vehicles: vehicles.map(serializeVehicle).sort((a, b) => b.createdAt - a.createdAt) });
 }));
 
+// ── Simulador (app): listar/criar carros com rastreador virtual ─────────
+// A apiKey só aparece aqui porque o device é server-sim e o veículo pertence
+// ao usuário autenticado. Respostas com credencial nunca devem ser cacheadas.
+
+function simulationEntry(vehicle, device) {
+  return {
+    vehicle: { ...serializeVehicle(vehicle), simulated: device?.model === 'server-sim' },
+    simulated: device?.model === 'server-sim',
+    device: serializeSimulationDevice(device),
+    runner: simulationRunner(device?.deviceId),
+    simulation: getSimulationDecision(vehicle, device),
+  };
+}
+
+simulationRouter.get('/vehicles', asyncHandler(async (req, res) => {
+  let vehicles;
+  try {
+    const snap = await getFirebase().firestore.collection('vehicles')
+      .where('ownerUid', '==', req.user.uid).get();
+    vehicles = await livePositions(snap.docs.map((d) => d.data()));
+    await mirrorVehicles(vehicles);
+  } catch (e) {
+    if (!isQuotaError(e)) throw e;
+    vehicles = await livePositions(await cachedVehicles(req.user.uid));
+  }
+  vehicles.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+  const devices = await Promise.all(vehicles.map((v) => readDevice(v.id)));
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    simulationAvailable: config.simulationEnabled,
+    runnerAvailable: simulationRunnerAvailable(),
+    vehicles: vehicles.map((v, i) => simulationEntry(v, devices[i])),
+  });
+}));
+
+simulationRouter.post('/vehicles', asyncHandler(async (req, res) => {
+  const { vehicle, device } = await createSimulatedVehicleForOwner(req.user.uid, req.body);
+  await mirrorVehicles([vehicle]);
+  if (device) await mirrorDevice(device);
+  res.set('Cache-Control', 'no-store');
+  res.status(201).json(simulationEntry(vehicle, device));
+}));
+
 router.get('/:id', asyncHandler(async (req, res) => {
   const vehicle = await readVehicle(req.user.uid, req.params.id);
   const device = await readDevice(vehicle.id);
@@ -177,9 +233,11 @@ router.post('/:id/device', asyncHandler(async (req, res) => {
 router.get('/:id/simulation', asyncHandler(async (req, res) => {
   const v = await readVehicle(req.user.uid, req.params.id);
   const device = await readDevice(v.id);
+  res.set('Cache-Control', 'no-store');
   res.json({
     simulation: getSimulationDecision(v, device),
     runner: simulationRunner(device?.deviceId),
+    device: serializeSimulationDevice(device),
   });
 }));
 
@@ -190,7 +248,9 @@ router.post('/:id/simulation', asyncHandler(async (req, res) => {
   const { vehicle, device, runner } = await applySimulationDecision(v, simulate);
   await mirrorVehicles([vehicle]);
   await mirrorDevice(device);
-  res.json({ simulation: getSimulationDecision(vehicle, device), runner, vehicle: serializeVehicle(vehicle), device: serializeDevicePublic(device) });
+  res.set('Cache-Control', 'no-store');
+  res.json({ simulation: getSimulationDecision(vehicle, device), runner, vehicle: serializeVehicle(vehicle), device: serializeSimulationDevice(device) });
 }));
 
+export { simulationRouter };
 export default router;
