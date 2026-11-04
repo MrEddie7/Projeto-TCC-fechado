@@ -111,7 +111,7 @@
    node src/server.js              # API em http://localhost:3000
 
    npm run simulator               # requer VTSIM_DEVICE_ID e VTSIM_API_KEY
-   npm run api                     # sobe a API + um simulador por device
+   npm run api                     # sobe a API (ela gerencia os simuladores server-sim)
 
    O Firebase é obrigatório: coloque a chave da conta de serviço em
    backend/firebase-service-account.json antes de subir a API.
@@ -731,13 +731,16 @@
  gratuito e de 20 mil/dia. Se a cota acabar, a API continua funcionando pelo
  fallback no RTDB (secao 12b).
 
-   Subir a API + um simulador por veículo:
+   Subir a API + a frota virtual:
      npm run api
 
-   O ./api.sh lê a frota do FIRESTORE via `node src/list-devices.js`, que
-   devolve SOMENTE os devices virtuais (model='server-sim'), e sobe um
-   processo node por device, cada um com PID e log próprios em
-   .run/sim-<n>.pid.
+   Quem gerencia os simuladores é a própria API
+   (services/simulation-fleet.js). No boot, `startSimulationFleet()` lê os
+   devices virtuais (model='server-sim') do FIRESTORE e sobe um processo
+   `hardware-simulator.js` por device. Ao adicionar/remover um veículo da
+   simulação no painel, a API sobe/derruba o processo correspondente sem
+   precisar de restart. Os logs dos filhos aparecem no .run/api.log com o
+   prefixo `[sim <deviceId>]`.
 
    Devices com model vazio NAO são simulados de propósito: eles são
    reservados para o rastreador de hardware real (ESP32). Se o simulador
@@ -745,8 +748,8 @@
    telemetria com o mesmo deviceId.
 
    Variáveis úteis:
-     SIM_FLEET=2          limita quantos veículos simular
-     START_SIMULATOR=false sobe só a API
+     SIM_FLEET=2          limita quantos veículos subir no boot
+     START_SIMULATOR=false sobe só a API, sem processos de simulação
      VTSIM_DEVICE_ID / VTSIM_API_KEY  fixa um único veículo
 
    Cada simulador retoma da posição atual do seu veículo (campo /status),

@@ -130,6 +130,17 @@ function serializeDevice(device) {
 }
 
 function serializeVehicle(v, { device, telemetry }) {
+  // A posição do documento do veículo no Firestore é gravada com throttle
+  // (telemetry.service.js: WRITE_THROTTLE_MS). A telemetria do RTDB é a fonte
+  // ao vivo; quando ela existe, tem prioridade sobre o documento.
+  const live = telemetry && typeof telemetry === 'object' && !Array.isArray(telemetry)
+    ? telemetry
+    : null;
+  const latitude = live?.latitude ?? v.latitude;
+  const longitude = live?.longitude ?? v.longitude;
+  const speed = live?.speed ?? v.speed;
+  const lastUpdate = live?.timestamp ?? v.lastUpdate;
+
   return {
     id: num(v.id),
     plate: v.plate || '',
@@ -144,11 +155,11 @@ function serializeVehicle(v, { device, telemetry }) {
     // Tudo agora vem do Firestore, inclusive o que o app cadastrou.
     origin: 'firestore',
     source: 'firestore',
-    latitude: num(v.latitude),
-    longitude: num(v.longitude),
-    speed: num(v.speed),
-    lastUpdate: num(v.lastUpdate),
-    online: online(v.lastUpdate),
+    latitude: num(latitude),
+    longitude: num(longitude),
+    speed: num(speed),
+    lastUpdate: num(lastUpdate),
+    online: online(lastUpdate),
     // O rastreador real manda um heartbeat a cada 60s mesmo sem GPS ligado.
     // "connected" = o dispositivo falou com a API recentemente; "online" =
     // chegou telemetria de GPS nos ultimos minutos.
@@ -427,7 +438,7 @@ export async function listAllVehicles() {
       const device = deviceByVehicle.get(num(v.id)) || null;
       const last = telemetryByVehicle.get(num(v.id)) || null;
       return {
-        ...serializeVehicle(v, { device: serializeDevice(device), telemetry: null }),
+        ...serializeVehicle(v, { device: serializeDevice(device), telemetry: last }),
         owner: ownerOf(v.ownerUid),
         telemetry: last,
         _raw: { device, telemetry: last },
@@ -450,9 +461,10 @@ export async function getVehicleAny(vehicleId) {
   }
   // Histórico recente via RTDB (sem varrer a coleção do Firestore).
   const points = await recentPoints(vehicle.id, { limit: 200 });
+  const last = points.length ? points[points.length - 1] : null;
 
   return {
-    vehicle: serializeVehicle(vehicle, { device: serializeDevice(device), telemetry: null }),
+    vehicle: serializeVehicle(vehicle, { device: serializeDevice(device), telemetry: last }),
     device: serializeDevice(device),
     owner: await ownerOf(vehicle.ownerUid),
     telemetry: points,

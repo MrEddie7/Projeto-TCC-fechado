@@ -13,6 +13,7 @@ import {
   applySimulationDecision,
   simulateFromBody,
 } from '../services/simulation.service.js';
+import { simulationRunner } from '../services/simulation-fleet.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -176,17 +177,20 @@ router.post('/:id/device', asyncHandler(async (req, res) => {
 router.get('/:id/simulation', asyncHandler(async (req, res) => {
   const v = await readVehicle(req.user.uid, req.params.id);
   const device = await readDevice(v.id);
-  res.json({ simulation: getSimulationDecision(v, device) });
+  res.json({
+    simulation: getSimulationDecision(v, device),
+    runner: simulationRunner(device?.deviceId),
+  });
 }));
 
 router.post('/:id/simulation', asyncHandler(async (req, res) => {
   const v = await readVehicle(req.user.uid, req.params.id);
   const simulate = simulateFromBody(req.body);
   if (typeof simulate !== 'boolean') throw new HttpError(400, 'Informe simulate: true (simular) ou false (teste real)');
-  const { vehicle, device } = await applySimulationDecision(v, simulate);
+  const { vehicle, device, runner } = await applySimulationDecision(v, simulate);
   await mirrorVehicles([vehicle]);
   await mirrorDevice(device);
-  res.json({ simulation: getSimulationDecision(vehicle, device), vehicle: serializeVehicle(vehicle), device: serializeDevicePublic(device) });
+  res.json({ simulation: getSimulationDecision(vehicle, device), runner, vehicle: serializeVehicle(vehicle), device: serializeDevicePublic(device) });
 }));
 
 export default router;

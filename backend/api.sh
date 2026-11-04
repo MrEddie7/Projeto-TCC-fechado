@@ -2,11 +2,12 @@
 # ─────────────────────────────────────────────────────────────────────────
 # SECURITAS - controle da API
 #
-# Sobe/derruba a API e o simulador de hardware juntos, com PID e log
-# por processo. Pensado para uso diário durante o desenvolvimento.
+# Sobe/derruba a API. A frota de simuladores é filha do processo da API
+# (services/simulation-fleet.js): ela mesma sobe um hardware-simulator por
+# device server-sim e derruba junto no shutdown.
 #
 # Uso:
-#   ./api.sh start     inicia API + um simulador por veículo (padrão)
+#   ./api.sh start     inicia a API e, com ela, a frota virtual (padrão)
 #   ./api.sh stop      derruba tudo
 #   ./api.sh restart   stop + start
 #   ./api.sh status    mostra o que está de pé
@@ -15,7 +16,7 @@
 # Variáveis de ambiente:
 #   PORT              porta da API (padrão: a do .env, fallback 3000)
 #   START_SIMULATOR   "false" para subir só a API, sem os simuladores
-#   SIM_FLEET         quantos veículos simular (padrão: todos os que têm device)
+#   SIM_FLEET         quantos veículos subir no boot (padrão: todos os server-sim)
 #   VTSIM_DEVICE_ID   fixa um único device (ignora a frota)
 #   VTSIM_API_KEY     credencial do device fixado
 # ─────────────────────────────────────────────────────────────────────────

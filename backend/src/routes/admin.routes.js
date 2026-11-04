@@ -34,6 +34,7 @@ import {
   syncFirebaseUsers,
   syncMobileDevicesToRtdb,
 } from '../services/simulation.service.js';
+import { simulationRunner } from '../services/simulation-fleet.js';
 import { COMMANDS, commandFromBody, enqueueCommand, serializeCommand } from '../services/commands.service.js';
 
 const router = Router();
@@ -187,7 +188,10 @@ router.get(
   asyncHandler(async (req, res) => {
     const vehicle = await rawVehicle(req.params.id);
     const device = await deviceOfVehicle(vehicle.id);
-    res.json({ simulation: getSimulationDecision(vehicle, device) });
+    res.json({
+      simulation: getSimulationDecision(vehicle, device),
+      runner: simulationRunner(device?.deviceId),
+    });
   })
 );
 
@@ -201,9 +205,10 @@ router.post(
     if (typeof simulate !== 'boolean') {
       throw new HttpError(400, 'Informe simulate: true (simular) ou false (teste real)');
     }
-    const { vehicle: updated, device } = await applySimulationDecision(vehicle, simulate);
+    const { vehicle: updated, device, runner } = await applySimulationDecision(vehicle, simulate);
     res.json({
       simulation: getSimulationDecision(updated, device),
+      runner,
       vehicle: { ...serializeVehicle(updated), simulated: Boolean(device && device.model === 'server-sim') },
       device: serializeDevice(device),
     });
@@ -272,13 +277,14 @@ router.post(
       await fs.collection('vehicles').doc(String(vehicle.id)).delete().catch(() => {});
       throw err;
     }
-    const { vehicle: updated, device } = applied;
+    const { vehicle: updated, device, runner } = applied;
     await mirrorVehicles([updated]);
     if (device) await mirrorDevice(device);
 
     res.status(201).json({
       vehicle: { ...serializeVehicle(updated), simulated: true },
       device: serializeDevice(device),
+      runner,
       simulation: getSimulationDecision(updated, device),
     });
   })

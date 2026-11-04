@@ -165,7 +165,7 @@ No diretório `backend/`:
 A API inicia, por padrão, em `http://localhost:3000`. Comandos adicionais:
 
   npm run simulator  simula um rastreador GPS
-  npm run api        sobe a API + um simulador por rastreador cadastrado
+  npm run api        sobe a API; ela mesma gerencia um simulador por device server-sim
 
 Para subir a API é necessário o Firebase: coloque a chave da conta de serviço em
 `backend/firebase-service-account.json` e preencha o `.env` (use `.env.example`

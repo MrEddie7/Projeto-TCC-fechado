@@ -89,7 +89,9 @@ export function getSimulationDecision(vehicle, device = undefined) {
  * Aplica a escolha { simulate: true|false }.
  * true  → cria o device virtual (model='server-sim') se não existir;
  * false → remove APENAS o device virtual, preservando hardware real.
- * Retorna { vehicle (documento atualizado), device }.
+ * Retorna { vehicle (documento atualizado), device, runner } — `runner` diz se
+ * o processo do simulador realmente subiu (em Vercel/START_SIMULATOR=false é
+ * normal existir device virtual sem runner local).
  */
 export async function applySimulationDecision(vehicle, simulate) {
   if (!config.simulationEnabled && simulate) {
@@ -99,6 +101,7 @@ export async function applySimulationDecision(vehicle, simulate) {
   const db = firestore();
   const vehicleRef = db.collection('vehicles').doc(String(vehicle.id));
   let device = await simDeviceOf(vehicle.id);
+  let runner = { started: false, managedBy: 'api' };
 
   if (simulate) {
     if (device && !isServerSim(device)) {
@@ -127,7 +130,14 @@ export async function applySimulationDecision(vehicle, simulate) {
       await vehicleRef.set({ latitude: startLat, longitude: startLng, updatedAt: now }, { merge: true });
     }
     rememberDevice({ ...device, plate: vehicle.plate || '' });
-    startSimulatedDevice(device);
+    const started = startSimulatedDevice(device);
+    runner = { started, managedBy: 'api' };
+    if (!started) {
+      console.warn(
+        `[sim] veículo ${vehicle.id}: simulador não iniciou ` +
+          '(SIMULATION_ENABLED/START_SIMULATOR/caminho do hardware-simulator.js)'
+      );
+    }
   } else if (isServerSim(device)) {
     const removedId = device.deviceId;
     stopSimulatedDevice(removedId);
@@ -138,7 +148,7 @@ export async function applySimulationDecision(vehicle, simulate) {
 
   await vehicleRef.set({ simulated: Boolean(simulate), updatedAt: Date.now() }, { merge: true });
   const updated = (await vehicleRef.get()).data();
-  return { vehicle: updated, device };
+  return { vehicle: updated, device, runner };
 }
 
 // ── Posição manual (painel: arrastar o veículo no mapa) ───────────────────
