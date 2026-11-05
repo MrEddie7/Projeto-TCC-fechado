@@ -14,6 +14,7 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
@@ -72,4 +73,12 @@ dependencies {
     implementation(libs.play.services.location)
 
     debugImplementation(libs.androidx.ui.tooling)
+
+    // Testes de layout da aba Rastrear (renderizam a tela em vários tamanhos
+    // de janela sem precisar de login/Firebase).
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.ui.test.junit4)
+    debugImplementation(libs.androidx.ui.test.manifest)
 }

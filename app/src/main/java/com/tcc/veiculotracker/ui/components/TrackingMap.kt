@@ -4,6 +4,7 @@ import android.content.Context
 import android.view.MotionEvent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
@@ -41,6 +42,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
@@ -281,17 +284,23 @@ private fun MapControlButton(
     icon: ImageVector,
     contentDescription: String,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    size: Dp = 40.dp,
+    iconSize: Dp = 20.dp
 ) {
     FilledIconButton(
         onClick = onClick,
-        modifier = modifier.size(40.dp),
+        modifier = modifier.size(size),
         colors = IconButtonDefaults.filledIconButtonColors(
             containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
             contentColor = MaterialTheme.colorScheme.primary
         )
     ) {
-        Icon(icon, contentDescription = contentDescription)
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            modifier = Modifier.size(iconSize)
+        )
     }
 }
 
@@ -303,32 +312,40 @@ private fun MapControlButton(
 private fun FocusTargetSelector(
     current: MapFocusTarget,
     onSelected: (MapFocusTarget) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** Mapa estreito/baixo: fica só o ícone, sem o rótulo, para não cobrir o mapa. */
+    iconOnly: Boolean = false,
+    iconSize: Dp = 20.dp
 ) {
     var expanded by remember { mutableStateOf(false) }
     val isVehicle = current == MapFocusTarget.VEHICLE
+    val label = if (isVehicle) "Veículo" else "Celular"
 
     Box(modifier = modifier) {
         OutlinedButton(
             onClick = { expanded = true },
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+            contentPadding = if (iconOnly) {
+                PaddingValues(start = 6.dp, end = 0.dp, top = 4.dp, bottom = 4.dp)
+            } else {
+                PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+            },
             colors = ButtonDefaults.outlinedButtonColors(
                 containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
             )
         ) {
             Icon(
                 imageVector = if (isVehicle) Icons.Default.DirectionsCar else Icons.Default.PhoneAndroid,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp)
+                contentDescription = if (iconOnly) "Focalizando: $label" else null,
+                modifier = Modifier.size(iconSize)
             )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = if (isVehicle) "Veículo" else "Celular",
-                style = MaterialTheme.typography.labelMedium
-            )
+            if (!iconOnly) {
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(text = label, style = MaterialTheme.typography.labelMedium)
+            }
             Icon(
                 imageVector = Icons.Default.ArrowDropDown,
-                contentDescription = "Escolher onde focalizar o mapa"
+                contentDescription = "Escolher onde focalizar o mapa",
+                modifier = Modifier.size(iconSize)
             )
         }
 
@@ -368,6 +385,9 @@ private fun MapSurface(
     onFocusTargetChange: (MapFocusTarget) -> Unit,
     isFullscreen: Boolean,
     onToggleFullscreen: () -> Unit,
+    /** Zoom +/- sobrepostos. Desligado no mapa recolhido da aba Rastrear,
+     *  onde a altura (~140dp) não comporta os três botões empilhados. */
+    showZoomControls: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -378,7 +398,41 @@ private fun MapSurface(
         onDispose { controller.onDetach() }
     }
 
-    Box(modifier = modifier) {
+    // Os controles sobrepostos medem o PRÓPRIO mapa, não a tela: no cartão da
+    // aba Rastrear ele tem 140–280dp de altura enquanto o celular tem 800dp.
+    BoxWithConstraints(modifier = modifier) {
+        // Escalas dos ícones: "dense" é o mapa recolhido (140dp), "tight" o
+        // cartão padrão num telefone (200–240dp), e o caso normal é a tela
+        // cheia/tablet.
+        val dense = maxHeight < 190.dp
+        val tight = !dense && (maxHeight < 260.dp || maxWidth < 340.dp)
+        val buttonSize = when {
+            dense -> 30.dp
+            tight -> 34.dp
+            else -> 40.dp
+        }
+        val iconSize = when {
+            dense -> 16.dp
+            tight -> 18.dp
+            else -> 20.dp
+        }
+        val edge = when {
+            dense -> 4.dp
+            tight -> 6.dp
+            else -> 8.dp
+        }
+        val gap = when {
+            dense -> 4.dp
+            tight -> 6.dp
+            else -> 8.dp
+        }
+        // Empilhar os três botões só quando a coluna couber sem comer o mapa.
+        val stackHeight = buttonSize * 3 + gap * 2
+        val showZoom = showZoomControls && maxHeight >= stackHeight + edge * 2 + 8.dp
+        // Mapa estreito: o seletor de foco fica só com o ícone para não
+        // encostar na coluna de controles.
+        val iconOnlyFocus = maxWidth < 360.dp || dense
+
         AndroidView(
             factory = { ctx ->
                 controller.onAttach(ctx).also {
@@ -398,49 +452,67 @@ private fun MapSurface(
         FocusTargetSelector(
             current = focusTarget,
             onSelected = onFocusTargetChange,
+            iconOnly = iconOnlyFocus,
+            iconSize = iconSize,
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(8.dp)
+                .padding(edge)
         )
 
-        // Controles no canto superior direito.
+        // Controles sobrepostos, no padrão dos apps de mapa: tela cheia no
+        // topo direito e zoom + centralizar agrupados no canto inferior
+        // direito (perto do polegar), sem botão solto no meio do mapa.
         Box(
             modifier = Modifier
                 .matchParentSize()
                 .then(if (isFullscreen) Modifier.systemBarsPadding() else Modifier)
         ) {
-            Column(
+            MapControlButton(
+                icon = if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                contentDescription = if (isFullscreen) "Sair da tela cheia" else "Tela cheia",
+                onClick = onToggleFullscreen,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                MapControlButton(
-                    icon = if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                    contentDescription = if (isFullscreen) "Sair da tela cheia" else "Tela cheia",
-                    onClick = onToggleFullscreen
-                )
-                MapControlButton(
-                    icon = Icons.Default.ZoomIn,
-                    contentDescription = "Aproximar",
-                    onClick = { controller.zoomIn() }
-                )
-                MapControlButton(
-                    icon = Icons.Default.ZoomOut,
-                    contentDescription = "Afastar",
-                    onClick = { controller.zoomOut() }
-                )
-            }
+                    .padding(edge)
+                    .testTag("map-btn-fullscreen"),
+                size = buttonSize,
+                iconSize = iconSize
+            )
 
-            MapControlButton(
-                icon = Icons.Default.MyLocation,
-                contentDescription = if (focusTarget == MapFocusTarget.VEHICLE)
-                    "Centralizar no veículo" else "Centralizar no celular",
-                onClick = { controller.recenterOnFocus() },
+            Column(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(8.dp)
-            )
+                    .padding(edge),
+                verticalArrangement = Arrangement.spacedBy(gap)
+            ) {
+                if (showZoom) {
+                    MapControlButton(
+                        icon = Icons.Default.ZoomIn,
+                        contentDescription = "Aproximar",
+                        onClick = { controller.zoomIn() },
+                        modifier = Modifier.testTag("map-btn-zoom-in"),
+                        size = buttonSize,
+                        iconSize = iconSize
+                    )
+                    MapControlButton(
+                        icon = Icons.Default.ZoomOut,
+                        contentDescription = "Afastar",
+                        onClick = { controller.zoomOut() },
+                        modifier = Modifier.testTag("map-btn-zoom-out"),
+                        size = buttonSize,
+                        iconSize = iconSize
+                    )
+                }
+                MapControlButton(
+                    icon = Icons.Default.MyLocation,
+                    contentDescription = if (focusTarget == MapFocusTarget.VEHICLE)
+                        "Centralizar no veículo" else "Centralizar no celular",
+                    onClick = { controller.recenterOnFocus() },
+                    modifier = Modifier.testTag("map-btn-recenter"),
+                    size = buttonSize,
+                    iconSize = iconSize
+                )
+            }
         }
     }
 }
@@ -454,6 +526,7 @@ fun TrackingMap(
     phoneLongitude: Double = 0.0,
     focusTarget: MapFocusTarget = MapFocusTarget.VEHICLE,
     onFocusTargetChange: (MapFocusTarget) -> Unit = {},
+    showZoomControls: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     var fullscreen by remember { mutableStateOf(false) }
@@ -468,6 +541,7 @@ fun TrackingMap(
         onFocusTargetChange = onFocusTargetChange,
         isFullscreen = false,
         onToggleFullscreen = { fullscreen = true },
+        showZoomControls = showZoomControls,
         modifier = modifier
     )
 
@@ -493,6 +567,8 @@ fun TrackingMap(
                     onFocusTargetChange = onFocusTargetChange,
                     isFullscreen = true,
                     onToggleFullscreen = { fullscreen = false },
+                    // Na tela cheia os controles sempre cabem.
+                    showZoomControls = true,
                     modifier = Modifier.fillMaxSize()
                 )
             }

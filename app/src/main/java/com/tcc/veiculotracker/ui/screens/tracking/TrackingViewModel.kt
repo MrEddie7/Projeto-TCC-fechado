@@ -86,15 +86,24 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
                     )
                 }
                 .collect { vehicles ->
-                    _state.value = _state.value.copy(
+                    val current = _state.value
+                    val refreshed = current.selectedVehicle?.let { sel ->
+                        vehicles.firstOrNull { it.id == sel.id } ?: sel
+                    }
+                    // Sem lista de veículos no rodapé, o seletor do topo é a
+                    // única forma de escolher: já abre no primeiro veículo em
+                    // vez de deixar a aba vazia até o usuário tocar no seletor.
+                    val selection = refreshed ?: vehicles.firstOrNull()
+                    val firstPick = current.selectedVehicle == null && selection != null
+                    _state.value = current.copy(
                         vehicles  = vehicles,
                         isLoading = false,
                         // O veículo selecionado era uma cópia congelada: sem
                         // isto, o badge de bloqueio e o rótulo do botão nunca
                         // refletiam o ACK do rastreador.
-                        selectedVehicle = _state.value.selectedVehicle?.let { sel ->
-                            vehicles.firstOrNull { it.id == sel.id } ?: sel
-                        }
+                        selectedVehicle = selection,
+                        currentLatitude = if (firstPick && selection != null) selection.latitude else current.currentLatitude,
+                        currentLongitude = if (firstPick && selection != null) selection.longitude else current.currentLongitude
                     )
                 }
         }
