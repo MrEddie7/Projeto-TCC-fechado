@@ -148,10 +148,12 @@ fun TrackingContent(
             // mapa, altura útil só influencia os paddings (paisagem).
             val compact = maxWidth < 400.dp || maxHeight < 520.dp
             val horizontal = if (compact) 12.dp else 16.dp
+            // Mesmo ponto de corte do `compact` (400dp): todo telefone de
+            // 411dp — a largura mais comum hoje — ganha o mapa de 240dp.
             val mapHeight = when {
                 mapCollapsed -> 140.dp
                 maxWidth >= 600.dp -> 280.dp
-                maxWidth >= 420.dp -> 240.dp
+                maxWidth >= 400.dp -> 240.dp
                 else -> 200.dp
             }
             val vehicle = state.selectedVehicle
