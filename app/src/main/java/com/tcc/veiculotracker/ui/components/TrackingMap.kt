@@ -411,6 +411,9 @@ private fun MapSurface(
         val iconSize = if (tight) 18.dp else 20.dp
         val edge = if (tight) 6.dp else 8.dp
         val gap = if (tight) 6.dp else 8.dp
+        // Os dois controles do topo (veículo/celular e tela cheia) ficam um
+        // pouco mais altos que as margens laterais, como nos apps de mapa.
+        val topEdge = if (tight) 2.dp else 4.dp
         // Mapa estreito: o seletor de foco fica só com o ícone para não
         // encostar no botão de tela cheia.
         val iconOnlyFocus = maxWidth < 360.dp
@@ -447,7 +450,7 @@ private fun MapSurface(
                 iconSize = iconSize,
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .padding(edge)
+                    .padding(start = edge, top = topEdge, end = edge)
                     .testTag("map-btn-focus-target")
             )
 
@@ -457,7 +460,7 @@ private fun MapSurface(
                 onClick = onToggleFullscreen,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(edge)
+                    .padding(start = edge, top = topEdge, end = edge)
                     .testTag("map-btn-fullscreen"),
                 size = buttonSize,
                 iconSize = iconSize
