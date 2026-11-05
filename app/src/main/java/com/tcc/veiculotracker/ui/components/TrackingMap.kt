@@ -10,8 +10,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -371,8 +371,16 @@ private fun FocusTargetSelector(
 }
 
 /**
- * Superfície do mapa com os controles sobrepostos (tela cheia, zoom e
- * centralizar). Usada tanto no cartão quanto no modo tela cheia.
+ * Superfície do mapa com os controles sobrepostos. Usada tanto no cartão
+ * quanto no modo tela cheia, sempre com o mesmo padrão de cantos:
+ *
+ *  - seletor Veículo/Celular no topo ESQUERDO;
+ *  - tela cheia no topo DIREITO;
+ *  - zoom +/-, e centralizar empilhados no canto inferior DIREITO.
+ *
+ * A aba Rastrear só tem dois tamanhos de mapa (240dp e 280dp), então os
+ * controles cabem sempre; a única adaptação é o tamanho dos botões, menor no
+ * mapa médio.
  */
 @Composable
 private fun MapSurface(
@@ -385,9 +393,6 @@ private fun MapSurface(
     onFocusTargetChange: (MapFocusTarget) -> Unit,
     isFullscreen: Boolean,
     onToggleFullscreen: () -> Unit,
-    /** Zoom +/- sobrepostos. Desligado no mapa recolhido da aba Rastrear,
-     *  onde a altura (~140dp) não comporta os três botões empilhados. */
-    showZoomControls: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -398,40 +403,17 @@ private fun MapSurface(
         onDispose { controller.onDetach() }
     }
 
-    // Os controles sobrepostos medem o PRÓPRIO mapa, não a tela: no cartão da
-    // aba Rastrear ele tem 140–280dp de altura enquanto o celular tem 800dp.
     BoxWithConstraints(modifier = modifier) {
-        // Escalas dos ícones: "dense" é o mapa recolhido (140dp), "tight" o
-        // cartão padrão num telefone (200–240dp), e o caso normal é a tela
-        // cheia/tablet.
-        val dense = maxHeight < 190.dp
-        val tight = !dense && (maxHeight < 260.dp || maxWidth < 340.dp)
-        val buttonSize = when {
-            dense -> 30.dp
-            tight -> 34.dp
-            else -> 40.dp
-        }
-        val iconSize = when {
-            dense -> 16.dp
-            tight -> 18.dp
-            else -> 20.dp
-        }
-        val edge = when {
-            dense -> 4.dp
-            tight -> 6.dp
-            else -> 8.dp
-        }
-        val gap = when {
-            dense -> 4.dp
-            tight -> 6.dp
-            else -> 8.dp
-        }
-        // Empilhar os três botões só quando a coluna couber sem comer o mapa.
-        val stackHeight = buttonSize * 3 + gap * 2
-        val showZoom = showZoomControls && maxHeight >= stackHeight + edge * 2 + 8.dp
+        // Duas escalas: mapa médio (240dp) usa botões de 34dp; mapa grande
+        // (280dp) e tela cheia usam 40dp.
+        val tight = maxHeight < 260.dp || maxWidth < 340.dp
+        val buttonSize = if (tight) 34.dp else 40.dp
+        val iconSize = if (tight) 18.dp else 20.dp
+        val edge = if (tight) 6.dp else 8.dp
+        val gap = if (tight) 6.dp else 8.dp
         // Mapa estreito: o seletor de foco fica só com o ícone para não
-        // encostar na coluna de controles.
-        val iconOnlyFocus = maxWidth < 360.dp || dense
+        // encostar no botão de tela cheia.
+        val iconOnlyFocus = maxWidth < 360.dp
 
         AndroidView(
             factory = { ctx ->
@@ -448,25 +430,27 @@ private fun MapSurface(
             }
         )
 
-        // Caixa de opção: onde o mapa deve focalizar (veículo ↔ celular).
-        FocusTargetSelector(
-            current = focusTarget,
-            onSelected = onFocusTargetChange,
-            iconOnly = iconOnlyFocus,
-            iconSize = iconSize,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(edge)
-        )
-
-        // Controles sobrepostos, no padrão dos apps de mapa: tela cheia no
-        // topo direito e zoom + centralizar agrupados no canto inferior
-        // direito (perto do polegar), sem botão solto no meio do mapa.
+        // Em tela cheia o mapa ocupa a janela inteira (atrás da status bar e
+        // da barra de navegação). O inset é aplicado UMA vez na camada de
+        // controles, para que os dois cantos do topo fiquem na mesma linha e
+        // o rodapé não encoste na barra de gestos.
         Box(
             modifier = Modifier
                 .matchParentSize()
-                .then(if (isFullscreen) Modifier.systemBarsPadding() else Modifier)
+                .then(if (isFullscreen) Modifier.safeDrawingPadding() else Modifier)
         ) {
+            // Caixa de opção: onde o mapa deve focalizar (veículo ↔ celular).
+            FocusTargetSelector(
+                current = focusTarget,
+                onSelected = onFocusTargetChange,
+                iconOnly = iconOnlyFocus,
+                iconSize = iconSize,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(edge)
+                    .testTag("map-btn-focus-target")
+            )
+
             MapControlButton(
                 icon = if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
                 contentDescription = if (isFullscreen) "Sair da tela cheia" else "Tela cheia",
@@ -485,24 +469,22 @@ private fun MapSurface(
                     .padding(edge),
                 verticalArrangement = Arrangement.spacedBy(gap)
             ) {
-                if (showZoom) {
-                    MapControlButton(
-                        icon = Icons.Default.ZoomIn,
-                        contentDescription = "Aproximar",
-                        onClick = { controller.zoomIn() },
-                        modifier = Modifier.testTag("map-btn-zoom-in"),
-                        size = buttonSize,
-                        iconSize = iconSize
-                    )
-                    MapControlButton(
-                        icon = Icons.Default.ZoomOut,
-                        contentDescription = "Afastar",
-                        onClick = { controller.zoomOut() },
-                        modifier = Modifier.testTag("map-btn-zoom-out"),
-                        size = buttonSize,
-                        iconSize = iconSize
-                    )
-                }
+                MapControlButton(
+                    icon = Icons.Default.ZoomIn,
+                    contentDescription = "Aproximar",
+                    onClick = { controller.zoomIn() },
+                    modifier = Modifier.testTag("map-btn-zoom-in"),
+                    size = buttonSize,
+                    iconSize = iconSize
+                )
+                MapControlButton(
+                    icon = Icons.Default.ZoomOut,
+                    contentDescription = "Afastar",
+                    onClick = { controller.zoomOut() },
+                    modifier = Modifier.testTag("map-btn-zoom-out"),
+                    size = buttonSize,
+                    iconSize = iconSize
+                )
                 MapControlButton(
                     icon = Icons.Default.MyLocation,
                     contentDescription = if (focusTarget == MapFocusTarget.VEHICLE)
@@ -526,7 +508,6 @@ fun TrackingMap(
     phoneLongitude: Double = 0.0,
     focusTarget: MapFocusTarget = MapFocusTarget.VEHICLE,
     onFocusTargetChange: (MapFocusTarget) -> Unit = {},
-    showZoomControls: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     var fullscreen by remember { mutableStateOf(false) }
@@ -541,7 +522,6 @@ fun TrackingMap(
         onFocusTargetChange = onFocusTargetChange,
         isFullscreen = false,
         onToggleFullscreen = { fullscreen = true },
-        showZoomControls = showZoomControls,
         modifier = modifier
     )
 
@@ -567,9 +547,9 @@ fun TrackingMap(
                     onFocusTargetChange = onFocusTargetChange,
                     isFullscreen = true,
                     onToggleFullscreen = { fullscreen = false },
-                    // Na tela cheia os controles sempre cabem.
-                    showZoomControls = true,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .testTag("map-fullscreen")
                 )
             }
         }

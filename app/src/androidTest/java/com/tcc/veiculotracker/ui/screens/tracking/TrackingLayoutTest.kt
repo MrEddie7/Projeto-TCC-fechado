@@ -10,6 +10,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -116,6 +117,41 @@ class TrackingLayoutTest {
         )
     }
 
+    /** Nó de um controle específico dentro do mapa (o cartão e o diálogo têm tags iguais). */
+    private fun control(mapTag: String, tag: String) =
+        rule.onNode(hasTestTag(tag) and hasAnyAncestor(hasTestTag(mapTag)))
+
+    /**
+     * O padrão de cantos pedido: seletor no topo esquerdo, tela cheia no topo
+     * direito e zoom/centralizar empilhados no canto inferior direito.
+     */
+    private fun assertControlsInCorners(mapTag: String) {
+        val map = rule.onNodeWithTag(mapTag).getUnclippedBoundsInRoot()
+        val focus = control(mapTag, "map-btn-focus-target").getUnclippedBoundsInRoot()
+        val fullscreen = control(mapTag, "map-btn-fullscreen").getUnclippedBoundsInRoot()
+        val zoomIn = control(mapTag, "map-btn-zoom-in").getUnclippedBoundsInRoot()
+        val recenter = control(mapTag, "map-btn-recenter").getUnclippedBoundsInRoot()
+
+        assertDp(focus.top, fullscreen.top, "topo do seletor e da tela cheia")
+        assertTrue(
+            "o seletor de veículo/celular deveria ficar no canto superior esquerdo (left ${focus.left}, mapa ${map.left})",
+            focus.left < map.left + 80.dp
+        )
+        assertTrue(
+            "o botão de tela cheia deveria ficar no canto superior direito (right ${fullscreen.right}, mapa ${map.right})",
+            fullscreen.right > map.right - 80.dp
+        )
+        assertTrue(
+            "centralizar deveria ficar na metade inferior direita (right ${recenter.right}, bottom ${recenter.bottom})",
+            recenter.right > map.right - 80.dp && recenter.top > map.top + map.height / 2
+        )
+        assertTrue(
+            "o zoom deveria ficar acima do centralizar (zoom ${zoomIn.bottom}, centralizar ${recenter.top})",
+            zoomIn.bottom < recenter.top
+        )
+        assertDp(zoomIn.right, recenter.right, "coluna do zoom e do centralizar", tolerance = 3.dp)
+    }
+
     private fun screenshot(name: String) {
         val bitmap = rule.onRoot().captureToImage().asAndroidBitmap()
         val dir = InstrumentationRegistry.getInstrumentation()
@@ -161,58 +197,29 @@ class TrackingLayoutTest {
     }
 
     /**
-     * 320×568dp: com a lista removida o mapa cabe na primeira rolagem e os
-     * ícones sobrepostos ficam menores para não cobrir o mapa.
+     * 320×568dp: só existe a versão média do mapa (240dp), com os ícones
+     * sobrepostos menores para não cobrir o mapa.
      */
     @Test
-    fun compact_screen_shows_shrunk_map_icons() {
+    fun compact_screen_uses_medium_map_and_shrunk_icons() {
         render(width = 320.dp, height = 568.dp)
 
         rule.onNodeWithTag("tracking-list")
             .performScrollToNode(hasTestTag("tracking-map"))
 
+        assertDp(
+            rule.onNodeWithTag("tracking-map").getUnclippedBoundsInRoot().height,
+            240.dp,
+            "altura do mapa médio em 320dp"
+        )
         val fullscreen = rule.onNodeWithTag("map-btn-fullscreen").getUnclippedBoundsInRoot()
-        assertDp(fullscreen.width, 34.dp, "largura do ícone de tela cheia (mapa estreito)")
-        assertDp(fullscreen.height, 34.dp, "altura do ícone de tela cheia (mapa estreito)")
+        assertDp(fullscreen.width, 34.dp, "largura do ícone de tela cheia (mapa médio)")
+        assertDp(fullscreen.height, 34.dp, "altura do ícone de tela cheia (mapa médio)")
+        assertControlsInCorners("tracking-map")
         screenshot("tracking-320x568.png")
     }
 
-    /** Recolher o mapa devolve espaço: o mapa cai de 200dp para 140dp. */
-    @Test
-    fun collapsing_map_reduces_map_and_hides_legend() {
-        render(width = 320.dp, height = 568.dp)
-
-        rule.onNodeWithTag("tracking-list")
-            .performScrollToNode(hasTestTag("tracking-map"))
-        assertDp(
-            rule.onNodeWithTag("tracking-map").getUnclippedBoundsInRoot().height,
-            200.dp,
-            "altura do mapa expandido (320dp de largura)"
-        )
-        rule.onNodeWithText("Celular (você)").assertIsDisplayed()
-
-        val cardBefore = rule.onNodeWithTag("map-card").getUnclippedBoundsInRoot().height
-
-        rule.onNodeWithTag("tracking-list")
-            .performScrollToNode(hasTestTag("map-toggle"))
-        rule.onNodeWithTag("map-toggle").performClick()
-
-        assertDp(
-            rule.onNodeWithTag("tracking-map").getUnclippedBoundsInRoot().height,
-            140.dp,
-            "altura do mapa recolhido"
-        )
-        rule.onNodeWithText("Celular (você)").assertDoesNotExist()
-
-        val cardAfter = rule.onNodeWithTag("map-card").getUnclippedBoundsInRoot().height
-        assertTrue(
-            "recolher o mapa deveria liberar >= 90dp (antes $cardBefore, depois $cardAfter)",
-            (cardBefore.value - cardAfter.value) >= 90f
-        )
-        screenshot("tracking-collapsed.png")
-    }
-
-    /** 411dp de largura: mapa de 240dp e os três números em uma linha só. */
+    /** 411dp de largura: mapa médio de 240dp e controles nos quatro cantos. */
     @Test
     fun medium_width_keeps_map_at_240() {
         render(width = 411.dp, height = 891.dp)
@@ -224,6 +231,7 @@ class TrackingLayoutTest {
             240.dp,
             "altura do mapa em 411dp"
         )
+        assertControlsInCorners("tracking-map")
         screenshot("tracking-411x891.png")
     }
 
@@ -250,6 +258,28 @@ class TrackingLayoutTest {
             280.dp,
             "altura do mapa em 800dp"
         )
+        assertControlsInCorners("tracking-map")
+        val fullscreen = rule.onNodeWithTag("map-btn-fullscreen").getUnclippedBoundsInRoot()
+        assertDp(fullscreen.width, 40.dp, "largura do ícone no mapa grande")
+    }
+
+    /**
+     * Tela cheia: o mapa ocupa a janela, mas os controles continuam no mesmo
+     * padrão de cantos e alinhados no topo (inset aplicado aos dois lados).
+     */
+    @Test
+    fun fullscreen_keeps_controls_in_corners() {
+        render(width = 411.dp, height = 891.dp)
+
+        rule.onNodeWithTag("tracking-list")
+            .performScrollToNode(hasTestTag("tracking-map"))
+        rule.onNodeWithTag("map-btn-fullscreen").performClick()
+        rule.waitForIdle()
+
+        rule.onNode(hasTestTag("map-fullscreen")).assertIsDisplayed()
+        assertControlsInCorners("map-fullscreen")
+        control("map-fullscreen", "map-btn-fullscreen").assertIsDisplayed()
+        screenshot("tracking-fullscreen.png")
     }
 
     /**

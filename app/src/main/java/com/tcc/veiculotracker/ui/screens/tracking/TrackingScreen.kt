@@ -11,7 +11,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,7 +41,7 @@ import com.tcc.veiculotracker.ui.theme.Warning
  *
  * Agora a tela inteira é um único `LazyColumn`, o veículo é trocado pelo
  * seletor da barra superior (sempre visível, custo vertical zero) e o mapa tem
- * altura adaptativa com opção de recolher.
+ * só duas versões: média (240dp) e grande (280dp) em janelas com 600dp+.
  *
  * A lista de veículos que existia no fim da tela foi removida: era um segundo
  * seletor fazendo o que a barra superior já faz, e empurrava o mapa para baixo
@@ -130,10 +129,6 @@ fun TrackingContent(
     modifier: Modifier = Modifier,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() }
 ) {
-    // Recolher o mapa é preferência de leitura, não dado de negócio: sobrevive
-    // a rotação/troca de tema.
-    var mapCollapsed by rememberSaveable { mutableStateOf(false) }
-
     Scaffold(
         modifier = modifier,
         topBar = { TrackingTopBar(state = state, onSelectVehicle = onSelectVehicle) },
@@ -148,14 +143,9 @@ fun TrackingContent(
             // mapa, altura útil só influencia os paddings (paisagem).
             val compact = maxWidth < 400.dp || maxHeight < 520.dp
             val horizontal = if (compact) 12.dp else 16.dp
-            // Mesmo ponto de corte do `compact` (400dp): todo telefone de
-            // 411dp — a largura mais comum hoje — ganha o mapa de 240dp.
-            val mapHeight = when {
-                mapCollapsed -> 140.dp
-                maxWidth >= 600.dp -> 280.dp
-                maxWidth >= 400.dp -> 240.dp
-                else -> 200.dp
-            }
+            // Só existem duas versões do mapa: média (240dp), para telefones
+            // e janelas estreitas, e grande (280dp), para tablets/paisagem.
+            val mapHeight = if (maxWidth >= 600.dp) 280.dp else 240.dp
             val vehicle = state.selectedVehicle
 
             LazyColumn(
@@ -185,9 +175,7 @@ fun TrackingContent(
                         MapCard(
                             state = state,
                             height = mapHeight,
-                            collapsed = mapCollapsed,
                             compact = compact,
-                            onToggleCollapsed = { mapCollapsed = !mapCollapsed },
                             onRequestLocationPermission = onRequestLocationPermission,
                             onFocusTargetChange = onFocusTargetChange
                         )
@@ -612,9 +600,7 @@ private fun CommandMessageBar(message: String, failed: Boolean, onDismiss: () ->
 private fun MapCard(
     state: TrackingState,
     height: Dp,
-    collapsed: Boolean,
     compact: Boolean,
-    onToggleCollapsed: () -> Unit,
     onRequestLocationPermission: () -> Unit,
     onFocusTargetChange: (MapFocusTarget) -> Unit
 ) {
@@ -629,7 +615,7 @@ private fun MapCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 12.dp, end = 4.dp, top = 4.dp),
+                    .padding(start = 12.dp, end = 12.dp, top = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
@@ -644,15 +630,6 @@ private fun MapCard(
                     style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.weight(1f)
                 )
-                IconButton(
-                    onClick = onToggleCollapsed,
-                    modifier = Modifier.testTag("map-toggle")
-                ) {
-                    Icon(
-                        imageVector = if (collapsed) Icons.Default.UnfoldMore else Icons.Default.UnfoldLess,
-                        contentDescription = if (collapsed) "Expandir mapa" else "Recolher mapa"
-                    )
-                }
             }
 
             TrackingMap(
@@ -663,47 +640,42 @@ private fun MapCard(
                 phoneLongitude = if (state.isPhoneVisible) state.phoneLongitude else 0.0,
                 focusTarget = state.mapFocusTarget,
                 onFocusTargetChange = onFocusTargetChange,
-                // Com 140dp de altura os três botões de zoom não cabem sem
-                // cobrir o mapa; a tela cheia continua a um toque.
-                showZoomControls = !collapsed,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(height)
                     .testTag("tracking-map")
             )
 
-            if (!collapsed) {
-                // Legenda: veículo + celular no mesmo mapa (funções vinculadas)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    MapLegendDot(color = Warning, label = "Veículo")
-                    MapLegendDot(color = Primary, label = "Celular (você)")
-                }
+            // Legenda: veículo + celular no mesmo mapa (funções vinculadas)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                MapLegendDot(color = Warning, label = "Veículo")
+                MapLegendDot(color = Primary, label = "Celular (você)")
+            }
 
-                Text(
-                    text = phoneStatusText(state),
+            Text(
+                text = phoneStatusText(state),
+                modifier = Modifier
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = if (compact) 8.dp else 10.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            )
+
+            if (state.isTracking && !state.phonePermissionGranted) {
+                TextButton(
+                    onClick = onRequestLocationPermission,
                     modifier = Modifier
                         .padding(horizontal = 12.dp)
-                        .padding(bottom = if (compact) 8.dp else 10.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                )
-
-                if (state.isTracking && !state.phonePermissionGranted) {
-                    TextButton(
-                        onClick = onRequestLocationPermission,
-                        modifier = Modifier
-                            .padding(horizontal = 12.dp)
-                            .padding(bottom = 8.dp)
-                    ) {
-                        Icon(Icons.Default.LocationOn, contentDescription = null)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Conceder permissão de localização")
-                    }
+                        .padding(bottom = 8.dp)
+                ) {
+                    Icon(Icons.Default.LocationOn, contentDescription = null)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Conceder permissão de localização")
                 }
             }
         }
