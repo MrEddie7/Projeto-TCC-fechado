@@ -11,6 +11,7 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "simulator": "node src/hardware-simulator.js",
+    "prune": "node scripts/prune-non-google.js",
     "api": "./api.sh start",
     "api:stop": "./api.sh stop",
     "api:restart": "./api.sh restart",

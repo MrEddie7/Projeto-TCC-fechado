@@ -150,13 +150,59 @@
   .tab.active { background: var(--panel); color: var(--fg); border-color: var(--accent); }
   .tab:hover { color: var(--fg); }
 
-  /* Aba Simulador: lista de rastreadores virtuais. */
-  .sim-row-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; margin-top: 6px; }
-  .sim-key { font-family: ui-monospace, monospace; font-size: 11.5px; overflow-wrap: anywhere; }
-  .sim-runner { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; }
+  /* Aba Simulador: resumo no topo + cards de rastreadores virtuais. */
+  .sim-summary { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 12px; }
+  .sim-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+  .sim-card {
+    display: flex; flex-direction: column; min-width: 0; overflow: hidden;
+    border: 1px solid var(--line); border-radius: 10px; background: var(--panel2);
+  }
+  .sim-card-head {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;
+    flex-wrap: wrap; padding: 10px 12px; background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  .sim-card-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+  .sim-card-title b { font-family: ui-monospace, monospace; font-size: 15px; letter-spacing: .5px; }
+  .sim-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); }
+  .sim-status.ok { color: var(--ok); }
+  .sim-status.warn { color: var(--warn); }
+  .sim-status.err { color: var(--err); }
+  .sim-card-body { flex: 1; display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; }
+  .sim-meta { display: grid; gap: 5px; }
+  .sim-meta-row { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 8px; font-size: 12px; }
+  .sim-meta-row .k {
+    color: var(--muted); font-size: 10.5px; text-transform: uppercase;
+    letter-spacing: .5px; padding-top: 1px;
+  }
+  .sim-meta-row .v { overflow-wrap: anywhere; }
+  .sim-meta-row code { font-family: ui-monospace, monospace; font-size: 11.5px; }
+  .sim-cred { display: flex; flex-direction: column; gap: 7px; padding-top: 9px; border-top: 1px dashed var(--line); }
+  .sim-cred-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+  .sim-cred-row .k {
+    grid-column: 1 / -1; color: var(--muted); font-size: 10.5px;
+    text-transform: uppercase; letter-spacing: .5px;
+  }
+  .sim-cred code {
+    font-family: ui-monospace, monospace; font-size: 11.5px; background: var(--input);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+    overflow-wrap: anywhere; word-break: break-all;
+  }
+  .sim-cred-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .sim-hint-warn { color: var(--warn); font-size: 11.5px; }
+  .sim-card-foot {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    flex-wrap: wrap; padding: 9px 12px; background: var(--panel);
+    border-top: 1px solid var(--line);
+  }
+  .sim-runner { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--muted); }
   .sim-runner .dot { width: 8px; height: 8px; }
-  details.sim-key-box summary { cursor: pointer; color: var(--accent); font-size: 11.5px; }
-  details.sim-key-box code { display: block; margin-top: 4px; word-break: break-all; }
+
+  @media (max-width: 640px) {
+    .sim-grid { grid-template-columns: 1fr; }
+    .sim-card-foot .sim-toggle { flex: 1 1 100%; }
+    .sim-cred-actions button { flex: 1 1 auto; }
+  }
 
   /* Modal (chave do rastreador virtual / novo veículo simulado). */
   .modal {
@@ -299,8 +345,8 @@
   <div class="spacer"></div>
 
   <form id="loginForm">
-    <input id="email" type="email" placeholder="e-mail" value="aluno@tcc.com" autocomplete="username">
-    <input id="password" type="password" placeholder="senha" value="securitas123" autocomplete="current-password">
+    <input id="email" type="email" placeholder="e-mail" value="edwinclarwis777@gmail.com" autocomplete="username" required>
+    <input id="password" type="password" placeholder="senha" autocomplete="current-password" required>
     <button class="primary" type="submit" id="btnLogin">Entrar</button>
     <button type="button" id="btnLogout" hidden>Sair</button>
   </form>
@@ -431,13 +477,17 @@
       <div class="head">
         <h2>Simulador · rastreadores virtuais</h2>
         <div class="spacer"></div>
-        <span class="chip" id="chipSim"><span class="dot"></span><span>—</span></span>
         <button type="button" class="small primary" id="btnNewSimTab" title="Cria um veículo novo já com rastreador virtual e mostra a chave da API">+ Novo simulado</button>
         <button type="button" class="small" id="btnRefreshSim">Atualizar</button>
       </div>
       <div class="body">
         <p class="hint" id="simNotice">—</p>
-        <div id="simList"><div class="empty-state">Entre para ver os carros simulados.</div></div>
+        <div class="sim-summary">
+          <span class="chip" id="chipSim"><span class="dot"></span><span>—</span></span>
+          <span class="chip" id="chipSimConnected"><span class="dot"></span><span>— conectados</span></span>
+          <span class="chip" id="chipSimStale"><span class="dot"></span><span>— sem contato</span></span>
+        </div>
+        <div id="simList" class="sim-grid"><div class="empty-state">Entre para ver os carros simulados.</div></div>
       </div>
     </section>
   </div>
@@ -901,6 +951,20 @@ document.addEventListener('click', (ev) => {
     return;
   }
 
+  // "mostrar/ocultar" a chave dentro do card do simulador.
+  const reveal = el.closest('[data-reveal-key]');
+  if (reveal) {
+    ev.preventDefault();
+    const code = reveal.closest('.sim-cred-row')?.querySelector('code[data-key]');
+    if (code) {
+      const show = reveal.dataset.revealed !== '1';
+      code.textContent = show ? code.dataset.key : '••••••••••••';
+      reveal.dataset.revealed = show ? '1' : '0';
+      reveal.textContent = show ? 'ocultar' : 'mostrar';
+    }
+    return;
+  }
+
   // "Chave": abre o modal com device + apiKey do rastreador virtual.
   const key = el.closest('.key-btn');
   if (key) {
@@ -1062,7 +1126,11 @@ function renderSimulator(o) {
   const list = (o.vehicles || []).filter(
     (v) => v.simulated && v.device && v.device.model === 'server-sim'
   );
-  setChip($('chipSim'), list.length ? 'live' : 'warn', `${list.length} carro(s) simulado(s)`);
+  const connected = list.filter((v) => simulatorConnection(v.device).cls === 'ok').length;
+  const stale = list.length - connected;
+  setChip($('chipSim'), list.length ? 'live' : 'warn', `${list.length} simulado(s)`);
+  setChip($('chipSimConnected'), connected ? 'live' : '', `${connected} conectado(s)`);
+  setChip($('chipSimStale'), stale ? 'warn' : '', `${stale} sem contato`);
 
   const notice = $('simNotice');
   if (!state.simulationAvailable) {
@@ -1092,40 +1160,52 @@ function renderSimulator(o) {
     const conn = simulatorConnection(d);
     const runnerLabel = state.runnerAvailable
       ? (running ? 'runner ativo' : 'runner parado')
-      : '';
+      : 'runner externo';
     // Sem apiKey o botão copiaria uma string vazia (acontece quando a cota do
     // Firestore esgota e o device vem do espelho antigo, sem chave).
     const hasKey = Boolean(d.apiKey);
     const cmd = hasKey ? (v.simulatorCommand || simulatorCommand(d)) : '';
+    const vehicleText = [v.brand, v.model].filter(Boolean).join(' ') || '—';
+    const year = v.year ? String(v.year) : '—';
     return `
-      <div class="cloud-row">
-        <div>
-          <b>${esc(v.plate)}</b> <span class="badge sim">simulado</span>
-          <div class="sub">${esc(v.brand)} ${esc(v.model)} · ${esc(v.year)} · dono ${esc(owner.name || owner.email || '—')}</div>
-          <div class="sub">device <code>${esc(d.deviceId || '—')}</code></div>
-          ${hasKey
-            ? `<details class="sim-key-box sub">
-                 <summary>mostrar chave da API</summary>
-                 <code>${esc(d.apiKey)}</code>
-               </details>`
-            : `<div class="sub" style="color:var(--warn)">chave indisponível agora (cota do Firestore esgotada); tente novamente após a renovação da cota.</div>`}
-          <div class="sub" style="margin-top:4px">
-            <span class="sim-runner"><span class="dot ${conn.cls}"></span>${esc(conn.label)}</span>
-            ${runnerLabel ? `· ${esc(runnerLabel)}` : ''}
+      <article class="sim-card">
+        <div class="sim-card-head">
+          <div class="sim-card-title">
+            <b>${esc(v.plate || '—')}</b>
+            <span class="badge sim">simulado</span>
           </div>
-          ${conn.hint ? `<div class="sub">${esc(conn.hint)}</div>` : ''}
+          <span class="sim-status ${conn.cls}"><span class="dot ${conn.cls}"></span>${esc(conn.label)}</span>
         </div>
-        <div>
-          <div class="sub" style="text-align:right">${isLive(v) ? 'online' : 'offline'} · ${v.speed ?? 0} km/h<br>${fmtAgo(v.lastUpdate)}</div>
-          <div class="sim-row-actions">
-            ${hasKey
-              ? `<button type="button" class="small" data-copy="${esc(d.apiKey)}">copiar chave</button>
-                 <button type="button" class="small" data-copy="${esc(cmd)}">copiar comando</button>`
-              : ''}
-            <button type="button" class="small sim-toggle" data-sim-id="${Number(v.id)}" data-sim-next="0" title="Remove o rastreador virtual (o carro continua cadastrado)">Parar</button>
+        <div class="sim-card-body">
+          <div class="sim-meta">
+            <div class="sim-meta-row"><span class="k">Veículo</span><span class="v">${esc(vehicleText)} · ${esc(year)}</span></div>
+            <div class="sim-meta-row"><span class="k">Dono</span><span class="v">${esc(owner.name || owner.email || '—')}</span></div>
+            <div class="sim-meta-row"><span class="k">Device</span><span class="v"><code>${esc(d.deviceId || '—')}</code></span></div>
+            <div class="sim-meta-row"><span class="k">Estado</span><span class="v">${isLive(v) ? 'online' : 'offline'} · ${Number(v.speed) || 0} km/h</span></div>
+            <div class="sim-meta-row"><span class="k">Atualização</span><span class="v">${fmtAgo(v.lastUpdate)}</span></div>
           </div>
+          ${hasKey ? `
+          <div class="sim-cred">
+            <div class="sim-cred-row">
+              <span class="k">Chave da API</span>
+              <code data-key="${esc(d.apiKey)}">••••••••••••</code>
+              <button type="button" class="small" data-reveal-key>mostrar</button>
+            </div>
+            <div class="sim-cred-actions">
+              <button type="button" class="small" data-copy="${esc(d.apiKey)}">copiar chave</button>
+              <button type="button" class="small" data-copy="${esc(cmd)}">copiar comando</button>
+            </div>
+          </div>` : `
+          <div class="sim-cred">
+            <div class="sim-hint-warn">Chave indisponível agora (cota do Firestore esgotada). Tente novamente após a renovação da cota.</div>
+          </div>`}
+          ${conn.hint ? `<div class="hint">${esc(conn.hint)}</div>` : ''}
         </div>
-      </div>`;
+        <div class="sim-card-foot">
+          <span class="sim-runner"><span class="dot ${conn.cls}"></span>${esc(runnerLabel)}</span>
+          <button type="button" class="small sim-toggle" data-sim-id="${Number(v.id)}" data-sim-next="0" title="Remove o rastreador virtual (o carro continua cadastrado)">Parar</button>
+        </div>
+      </article>`;
   }).join('');
 }
 
@@ -1836,6 +1916,8 @@ $('btnLogout').addEventListener('click', async () => {
   $('phoneVehicles').innerHTML = '<div class="empty-state">Entre para ver os veículos enviados pelo app.</div>';
   $('simList').innerHTML = '<div class="empty-state">Entre para ver os carros simulados.</div>';
   setChip($('chipSim'), '', '—');
+  setChip($('chipSimConnected'), '', '— conectados');
+  setChip($('chipSimStale'), '', '— sem contato');
   setChip($('chipCloud'), '', '—');
   $('mapPhoneLegend').hidden = true;
   fleetLayer.clearLayers();
