@@ -378,7 +378,7 @@
   </div>
 
   <div class="layout">
-    <!-- Coluna esquerda: dados enviados pelo app, usuários/veículos e telas -->
+    <!-- Coluna esquerda: dados enviados pelo app e usuários/veículos -->
     <div class="col">
       <section class="panel">
         <div class="head">
@@ -400,20 +400,9 @@
         </div>
         <div id="users"><div class="empty-state">Entre para listar os usuários do sistema.</div></div>
       </section>
-
-      <section class="panel">
-        <div class="head">
-          <h2>Status das telas do sistema</h2>
-          <div class="spacer"></div>
-          <span class="meta" id="screensMeta">—</span>
-        </div>
-        <div class="body">
-          <div class="screens" id="screens"><div class="empty-state">—</div></div>
-        </div>
-      </section>
     </div>
 
-    <!-- Coluna direita: API em execução, mapa e logs -->
+    <!-- Coluna direita: API em execução, mapa, logs e status das telas -->
     <div class="col">
       <section class="panel">
         <div class="head">
@@ -467,6 +456,17 @@
           <span class="chip" id="chipStream"><span class="dot"></span><span>parado</span></span>
         </div>
         <div id="logs"><div class="empty">Entre para ver as requisições.</div></div>
+      </section>
+
+      <section class="panel">
+        <div class="head">
+          <h2>Status das telas do sistema</h2>
+          <div class="spacer"></div>
+          <span class="meta" id="screensMeta">—</span>
+        </div>
+        <div class="body">
+          <div class="screens" id="screens"><div class="empty-state">—</div></div>
+        </div>
       </section>
     </div>
   </div>
