@@ -746,6 +746,12 @@ function renderOverview(o) {
   if (selected) {
     state.vehicleDevice = selected.device || null;
     updateSimStatus();
+    // O overview lê o Firestore a cada 7 s: reconcilia o HUD mesmo quando o
+    // evento SSE `blocked` não chega (ACK em outra instância na Vercel).
+    if (state.vehicle && $('btnBlock')?.dataset.pending !== '1') {
+      const confirmed = selected.isBlocked === true;
+      if (!!state.vehicle.isBlocked !== confirmed) confirmBlockedState(confirmed, '');
+    }
   }
 
   renderUsers(o.users || []);
@@ -1387,7 +1393,8 @@ function setHud(plate, speed, lat, lng, battery, blocked) {
   $('hudLat').textContent = lat ?? '—';
   $('hudLng').textContent = lng ?? '—';
   $('hudBat').textContent = battery ?? '—';
-  $('hudBlocked').innerHTML = blocked ? '<span style="color:var(--err)">· BLOQUEADO</span>' : '';
+  const waiting = $('btnBlock')?.dataset.pending === '1';
+  renderBlockBadge(!!blocked, waiting);
   updateBlockButton();
 }
 
@@ -1401,6 +1408,67 @@ function updateBlockButton() {
   btn.textContent = pending ? 'Enviando...' : (blocked ? 'Desbloquear' : 'Bloquear');
   btn.className = 'small ' + (blocked ? 'ok' : 'danger');
   btn.disabled = pending || !state.vehicleId;
+}
+
+// Badge "BLOQUEADO" do HUD. Enquanto o comando aguarda o ACK mostramos o
+// alvo (bloqueando/desbloqueando) para o clique ter feedback imediato.
+function renderBlockBadge(blocked, pending) {
+  const el = $('hudBlocked');
+  if (!el) return;
+  if (pending) {
+    const target = state.blockTarget ? 'BLOQUEANDO' : 'DESBLOQUEANDO';
+    el.innerHTML = `<span style="color:var(--warn)">· ${target}…</span>`;
+  } else {
+    el.innerHTML = blocked ? '<span style="color:var(--err)">· BLOQUEADO</span>' : '';
+  }
+}
+
+// Aplica o estado CONFIRMADO (ACK do rastreador ou leitura do servidor) e
+// encerra a espera do comando.
+function confirmBlockedState(blocked, info) {
+  if (!state.vehicle) return;
+  state.vehicle.isBlocked = !!blocked;
+  state.blockTarget = null;
+  const btn = $('btnBlock');
+  if (btn) btn.dataset.pending = '0';
+  renderBlockBadge(!!blocked, false);
+  updateBlockButton();
+  if (info && $('hudBlockInfo')) $('hudBlockInfo').textContent = info;
+}
+
+// A Vercel pode executar o ACK em outra instância: o evento SSE `blocked`
+// publicado lá não alcança o stream aberto aqui. Por isso, depois de enviar
+// o comando, consultamos o veículo até o estado do servidor bater com o alvo.
+let blockWatchToken = 0;
+
+function stopBlockWatch() {
+  blockWatchToken += 1;
+}
+
+async function startBlockWatch(vehicleId, desired, timeoutMs = 20000) {
+  const token = ++blockWatchToken;
+  const started = Date.now();
+  while (token === blockWatchToken && Date.now() - started < timeoutMs) {
+    await new Promise((r) => setTimeout(r, 1500));
+    if (token !== blockWatchToken || Number(state.vehicleId) !== Number(vehicleId)) return;
+    const res = await api(`/v1/admin/vehicles/${vehicleId}`);
+    if (!res.ok || !res.data?.vehicle) continue;
+    if (!!res.data.vehicle.isBlocked === desired) {
+      confirmBlockedState(
+        desired,
+        desired ? 'bloqueio confirmado pelo rastreador' : 'veículo desbloqueado',
+      );
+      return;
+    }
+  }
+  if (token !== blockWatchToken || Number(state.vehicleId) !== Number(vehicleId)) return;
+  // Sem ACK em 20 s: libera o botão e deixa claro que o comando segue na fila.
+  const btn = $('btnBlock');
+  if (btn) btn.dataset.pending = '0';
+  state.blockTarget = null;
+  renderBlockBadge(!!state.vehicle?.isBlocked, false);
+  updateBlockButton();
+  if ($('hudBlockInfo')) $('hudBlockInfo').textContent = 'sem confirmação do rastreador — comando na fila';
 }
 
 // Estado de simulação do veículo selecionado, vindo de
@@ -1452,9 +1520,13 @@ function updateSimButton() {
 async function sendBlockCommand() {
   if (!state.vehicleId) return;
   const btn = $('btnBlock');
+  const vehicleId = state.vehicleId;
   const blocked = !!state.vehicle?.isBlocked;
   const command = blocked ? 'unblock' : 'block';
+  const desired = command === 'block';
+  state.blockTarget = desired;
   btn.dataset.pending = '1';
+  renderBlockBadge(blocked, true);
   updateBlockButton();
   const conn = simulatorConnection(state.vehicleDevice);
   const target = state.vehicleSimulated ? 'simulador' : 'rastreador';
@@ -1463,20 +1535,27 @@ async function sendBlockCommand() {
       ? `comando na fila — ${conn.label}`
       : `comando na fila — aguardando ${target}`;
   try {
-    const res = await api(`/v1/admin/vehicles/${state.vehicleId}/commands`, {
+    const res = await api(`/v1/admin/vehicles/${vehicleId}/commands`, {
       method: 'POST',
       body: JSON.stringify({ command }),
     });
     if (!res.ok) {
-      $('hudBlockInfo').textContent = 'falha ao enviar comando';
-    }
-  } catch (e) {
-    $('hudBlockInfo').textContent = 'falha ao enviar comando';
-  } finally {
-    setTimeout(() => {
       btn.dataset.pending = '0';
+      state.blockTarget = null;
+      renderBlockBadge(blocked, false);
       updateBlockButton();
-    }, 1200);
+      $('hudBlockInfo').textContent = 'falha ao enviar comando';
+      return;
+    }
+    // A confirmação chega pelo SSE `blocked`, mas na Vercel ele pode cair em
+    // outra instância; o watch confirma também por HTTP.
+    startBlockWatch(vehicleId, desired);
+  } catch (e) {
+    btn.dataset.pending = '0';
+    state.blockTarget = null;
+    renderBlockBadge(blocked, false);
+    updateBlockButton();
+    $('hudBlockInfo').textContent = 'falha ao enviar comando';
   }
 }
 
@@ -1690,11 +1769,10 @@ async function startTelemetryStream(vehicleId) {
           } else if (event === 'blocked') {
             // ACK do rastreador: o bloqueio só vale a partir daqui.
             const blocked = !!payload.isBlocked;
-            setHud(state.vehicle?.plate, state.vehicle?.speed, state.vehicle?.latitude,
-                   state.vehicle?.longitude, state.vehicle?.battery, blocked);
-            $('hudBlockInfo').textContent = blocked
-              ? 'bloqueio confirmado pelo rastreador'
-              : 'veiculo desbloqueado';
+            confirmBlockedState(
+              blocked,
+              blocked ? 'bloqueio confirmado pelo rastreador' : 'veículo desbloqueado',
+            );
           }
         }, ctrl.signal);
       } catch (e) {
@@ -1737,6 +1815,11 @@ async function loadVehicles() {
 }
 
 async function selectVehicle(id) {
+  stopBlockWatch();
+  const blockBtn = $('btnBlock');
+  if (blockBtn) blockBtn.dataset.pending = '0';
+  state.blockTarget = null;
+  if ($('hudBlockInfo')) $('hudBlockInfo').textContent = '';
   state.vehicleId = id;
   centered = false;
   const res = await api(`/v1/admin/vehicles/${id}`);

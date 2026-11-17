@@ -29,23 +29,22 @@ class VehicleRepository(
      * (que grava ownerUid + telemetria); sem backend, grava direto na nuvem.
      * Regravar um veículo que só mudou de posição do simulador sobrescreveria
      * os dados da API, então a criação é separada da atualização.
+     *
+     * Com backend configurado ele é a fonte da verdade: uma recusa (placa
+     * duplicada, validação, sessão expirada) NÃO pode cair no Firestore
+     * direto, senão o app criaria um cadastro paralelo/duplicado e esconderia
+     * o erro do usuário.
      */
     suspend fun registerVehicle(vehicle: VehicleModel): VehicleModel {
         val backend = syncManager.backendRepository
         if (backend != null && backend.isConfigured) {
-            val result = runCatching {
-                backend.createVehicle(
-                    vehicle.plate, vehicle.model, vehicle.brand, vehicle.year, vehicle.color
-                )
-            }.getOrNull()
-            val created = result?.getOrNull()
-            if (created != null) {
-                // O backend já gravou no Firestore; nada a publicar de novo.
-                return created
-            }
+            return backend.createVehicle(
+                vehicle.plate, vehicle.model, vehicle.brand, vehicle.year, vehicle.color
+            ).getOrThrow()
         }
         // Sem backend: grava direto no Firestore (id novo — é um cadastro).
-        runCatching { syncManager.syncVehicle(vehicle, isNew = true) }
+        // Erros sobem para a tela em vez de fingir que o cadastro funcionou.
+        syncManager.syncVehicle(vehicle, isNew = true)
         return vehicle
     }
 
