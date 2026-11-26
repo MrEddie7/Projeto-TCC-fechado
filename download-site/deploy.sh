@@ -30,7 +30,7 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
 # Arquivos versionados do site
-cp index.html qr.png vercel.json "$STAGE/"
+cp index.html qr.png logo.png vercel.json "$STAGE/"
 # APK da fonte (nao versionado aqui)
 cp "$APK_SRC" "$STAGE/securitas-app-debug.apk"
 # Link deterministico ao projeto securitas-download

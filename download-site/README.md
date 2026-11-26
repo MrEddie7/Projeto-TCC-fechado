@@ -14,7 +14,8 @@ function da API. O QR Code da página aponta para esta URL dedicada.
 
 | Arquivo | Papel |
 |---|---|
-| `index.html` | Página de download (estilo + botão + QR). Referencia `qr.png` e o APK relativamente. |
+| `index.html` | Página de download (estilo + botão + QR). Referencia `logo.png`, `qr.png` e o APK relativamente. |
+| `logo.png` | Logo da Securitas exibida no topo da página. |
 | `qr.png` | QR Code que codifica `https://securitas-download.vercel.app/`. |
 | `vercel.json` | Config de build estático (clean URLs, sem framework). |
 | `deploy.sh` | Copia o APK da fonte e faz `vercel deploy --prod`. |
