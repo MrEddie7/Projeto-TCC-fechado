@@ -139,7 +139,14 @@ fun NavGraph(startDestination: String = Screen.Login.route) {
             }
 
             composable(Screen.DeviceLocation.route) {
-                DeviceLocationScreen()
+                DeviceLocationScreen(
+                    onNavigateBack = {
+                        navController.navigate(Screen.Dashboard.route) {
+                            popUpTo(Screen.DeviceLocation.route) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    }
+                )
             }
 
             composable(
